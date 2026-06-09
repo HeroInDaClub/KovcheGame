@@ -1,4 +1,4 @@
-import { Lock, CheckCircle, Circle, Loader, Star } from 'lucide-react';
+import { Lock, CheckCircle, Circle, Loader, Star, ListChecks, Code2 } from 'lucide-react';
 
 const STATUS_CONFIG = {
   available:   { icon: Circle,      color: 'text-cyber-muted',   border: 'border-cyber-border',  label: 'Доступна' },
@@ -8,6 +8,12 @@ const STATUS_CONFIG = {
 };
 
 const LEVEL_COLORS = ['', 'text-[#4ae54a]', 'text-[#99ff44]', 'text-cyber-yellow', 'text-[#ff9f0a]', 'text-cyber-red'];
+
+const LANG_TAG = {
+  python: { label: 'PY', cls: 'border-[#3776ab] text-[#3776ab]' },
+  kumir:  { label: 'KU', cls: 'border-cyber-purple text-cyber-purple' },
+  pascal: { label: 'PA', cls: 'border-cyber-yellow text-cyber-yellow' },
+};
 
 export default function TaskCard({ task, status = 'available', isCaptain, onPick, isActive }) {
   const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.available;
@@ -42,15 +48,39 @@ export default function TaskCard({ task, status = 'available', isCaptain, onPick
         <StatusIcon size={12} className={cfg.color + (status === 'in_progress' ? ' animate-spin' : '')} />
       </div>
 
-      {/* Question preview (truncated) */}
+      {/* Type badge row */}
+      <div className="flex items-center gap-1 mb-1">
+        {task.type === 'multiple_choice' ? (
+          <span className="flex items-center gap-1 text-[9px] tracking-widest border border-cyber-blue text-cyber-blue px-1 py-px">
+            <ListChecks size={8} /> ТЕСТ
+          </span>
+        ) : (
+          <>
+            <span className="flex items-center gap-1 text-[9px] tracking-widest border border-cyber-purple text-cyber-purple px-1 py-px">
+              <Code2 size={8} /> КОД
+            </span>
+            {LANG_TAG[task.language] && (
+              <span className={`text-[9px] tracking-widest border px-1 py-px ${LANG_TAG[task.language].cls}`}>
+                {LANG_TAG[task.language].label}
+              </span>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Preview (truncated): для code_repair — кусок кода, иначе — вопрос */}
       <div className={`leading-tight ${status === 'abandoned' ? 'text-cyber-muted line-through' : 'text-cyber-text'}`}>
         {status === 'abandoned'
           ? <span className="text-cyber-red text-[10px] tracking-widest">// ЗАБЛОКИРОВАНА</span>
           : status === 'solved'
             ? <span className="text-cyber-neon text-[10px] tracking-widest">// РЕШЕНА ✓</span>
-            : task.question_ru.length > 55
-              ? task.question_ru.slice(0, 55) + '…'
-              : task.question_ru
+            : task.type === 'code_repair'
+              ? <code className="block bg-cyber-black px-1 py-0.5 text-[9.5px] text-cyber-blue/80 truncate font-mono">
+                  {(task.code_snippet || '').split('\n').find(l => l.includes('▓▓▓'))?.trim() || task.question_ru.slice(0, 50) + '…'}
+                </code>
+              : task.question_ru.length > 55
+                ? task.question_ru.slice(0, 55) + '…'
+                : task.question_ru
         }
       </div>
 

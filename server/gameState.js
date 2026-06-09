@@ -45,15 +45,42 @@ function shuffleArray(arr) {
   return a;
 }
 
+// Распределение задач в пуле комнаты:
+//   • 10 задач с каждого уровня → 50 всего
+//   • Внутри уровня: ровно половина multiple_choice, половина code_repair
+//   • Внутри code_repair: языки выбираются по очереди (python → kumir → pascal)
+//     чтобы каждая партия видела все три школьных языка
 function selectTaskPool() {
-  // 10 tasks from each difficulty level = 50 total
-  const byLevel = {};
-  for (let lvl = 1; lvl <= 5; lvl++) {
-    byLevel[lvl] = TASKS.filter(t => t.level === lvl);
-  }
   const pool = [];
   for (let lvl = 1; lvl <= 5; lvl++) {
-    pool.push(...shuffleArray(byLevel[lvl]).slice(0, 10));
+    const lvlTasks = TASKS.filter(t => t.level === lvl);
+    const mc       = shuffleArray(lvlTasks.filter(t => t.type === 'multiple_choice'));
+    const codeBy   = {
+      python: shuffleArray(lvlTasks.filter(t => t.type === 'code_repair' && t.language === 'python')),
+      kumir:  shuffleArray(lvlTasks.filter(t => t.type === 'code_repair' && t.language === 'kumir')),
+      pascal: shuffleArray(lvlTasks.filter(t => t.type === 'code_repair' && t.language === 'pascal')),
+    };
+
+    // целимся в 5 MC + 5 CR (2 py + 2 ku + 1 pa, или ротация)
+    const picked = [];
+    picked.push(...mc.slice(0, 5));
+
+    const langOrder = shuffleArray(['python', 'kumir', 'pascal']);
+    let idx = 0;
+    while (picked.length < 10) {
+      const lang = langOrder[idx % 3];
+      const bucket = codeBy[lang];
+      if (bucket.length > 0) picked.push(bucket.shift());
+      idx++;
+      if (idx > 30) break; // safety against tiny pools
+    }
+
+    // если по типу не хватает — добираем из любых оставшихся уровня
+    if (picked.length < 10) {
+      const remaining = lvlTasks.filter(t => !picked.includes(t));
+      picked.push(...shuffleArray(remaining).slice(0, 10 - picked.length));
+    }
+    pool.push(...picked);
   }
   return shuffleArray(pool);
 }
@@ -183,8 +210,13 @@ function pickTask(room, socketId, taskId) {
 }
 
 // ── Answer matching ─────────────────────────────────────
-// Three strategies, tried in order:
-//   1) exact     — нормализованный input === нормализованному task.answer
+// Dispatches on task.type:
+//   • multiple_choice → only 'exact' against correct_answer (option text)
+//   • code_repair     → exact / alternate / keywords cascade
+//                       (against correct_answer + acceptedAnswers + keywords)
+//
+// Strategy details:
+//   1) exact     — нормализованный input === нормализованному correct_answer
 //   2) alternate — input совпадает с одним из task.acceptedAnswers
 //   3) keywords  — input содержит ≥60% (округление вверх, мин. 1)
 //                  стемов из task.keywords (нечувствительно к порядку)
@@ -195,7 +227,7 @@ function normalize(s) {
     .toString()
     .toLowerCase()
     .replace(/ё/g, 'е')
-    .replace(/[^а-яa-z0-9\s]/g, ' ')   // strip punctuation, keep letters/digits/space
+    .replace(/[^а-яa-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -204,12 +236,21 @@ function checkAnswer(rawInput, task) {
   const input = normalize(rawInput);
   if (!input) return { correct: false };
 
-  // 1. Exact match against canonical answer
-  if (normalize(task.answer) === input) {
+  // Multiple-choice: ровно одно совпадение с correct_answer (текст опции)
+  if (task.type === 'multiple_choice') {
+    if (normalize(task.correct_answer) === input) {
+      return { correct: true, mode: 'choice' };
+    }
+    return { correct: false };
+  }
+
+  // Code-repair (включая free-text и select-mode):
+  // 1. Точное совпадение с эталоном
+  if (normalize(task.correct_answer) === input) {
     return { correct: true, mode: 'exact' };
   }
 
-  // 2. Exact match against any of the accepted alternates
+  // 2. Альтернативные формулировки
   if (Array.isArray(task.acceptedAnswers)) {
     for (const alt of task.acceptedAnswers) {
       if (normalize(alt) === input) {
@@ -218,7 +259,7 @@ function checkAnswer(rawInput, task) {
     }
   }
 
-  // 3. Keyword match (substring; keywords are usually short stems)
+  // 3. Ключевые стемы (только если задано >=1 keyword)
   if (Array.isArray(task.keywords) && task.keywords.length >= 1) {
     const required = Math.max(1, Math.ceil(task.keywords.length * 0.6));
     const matched = task.keywords.filter(kw => {
@@ -227,10 +268,10 @@ function checkAnswer(rawInput, task) {
     });
     if (matched.length >= required) {
       return {
-        correct:  true,
-        mode:     'keywords',
-        matched:  matched.length,
-        total:    task.keywords.length,
+        correct: true,
+        mode:    'keywords',
+        matched: matched.length,
+        total:   task.keywords.length,
         required,
       };
     }

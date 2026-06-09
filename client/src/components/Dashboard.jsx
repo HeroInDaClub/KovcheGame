@@ -1,8 +1,10 @@
 import { useState, useMemo } from 'react';
-import { Clock, Zap, BookOpen, X, Send, AlertTriangle } from 'lucide-react';
-import ShipMap    from './ShipMap.jsx';
-import TaskCard   from './TaskCard.jsx';
-import Leaderboard from './Leaderboard.jsx';
+import { Clock, BookOpen } from 'lucide-react';
+import ShipMap             from './ShipMap.jsx';
+import TaskCard            from './TaskCard.jsx';
+import Leaderboard         from './Leaderboard.jsx';
+import MultipleChoicePanel from './MultipleChoicePanel.jsx';
+import CodeRepairPanel     from './CodeRepairPanel.jsx';
 
 const LEVEL_LABELS = ['', 'Уровень 1', 'Уровень 2', 'Уровень 3', 'Уровень 4', 'Уровень 5'];
 const LEVEL_COLORS = ['', '#4ae54a', '#99ff44', '#ffd60a', '#ff9f0a', '#ff2d55'];
@@ -19,9 +21,8 @@ export default function Dashboard({
   playerName, isAdmin, notification,
   onPickTask, onSubmit, onAbandon, onStartGame,
 }) {
-  const [answer,      setAnswer]      = useState('');
   const [filterLevel, setFilterLevel] = useState(0);
-  const [showHint,    setShowHint]    = useState(false);
+  const [filterType,  setFilterType]  = useState('all'); // all | multiple_choice | code_repair
 
   const myTeam = useMemo(
     () => Object.values(roomState.teams).find(t => t.members.some(m => m.name === playerName)),
@@ -33,22 +34,19 @@ export default function Dashboard({
 
   const tasksByLevel = useMemo(() => {
     const groups = { 1: [], 2: [], 3: [], 4: [], 5: [] };
-    for (const t of roomState.taskPool) groups[t.level].push(t);
+    for (const t of roomState.taskPool) {
+      if (filterType !== 'all' && t.type !== filterType) continue;
+      groups[t.level].push(t);
+    }
     return groups;
-  }, [roomState.taskPool]);
+  }, [roomState.taskPool, filterType]);
 
   const getTaskStatus = (taskId) => {
     const st = myTeam?.taskStatuses?.[taskId];
     return st?.status || 'available';
   };
 
-  const handleSubmit = () => {
-    if (!answer.trim()) return;
-    onSubmit(answer.trim());
-    setAnswer('');
-  };
-
-  const timerUrgent  = timer !== null && timer < 300;
+  const timerUrgent   = timer !== null && timer < 300;
   const timerCritical = timer !== null && timer < 60;
 
   return (
@@ -132,6 +130,25 @@ export default function Dashboard({
                 УР.{lvl}
               </button>
             ))}
+
+            {/* Type filter */}
+            <div className="border-l border-cyber-border h-4 mx-1" />
+            {[
+              { key: 'all',             label: 'ТИП: ВСЕ' },
+              { key: 'multiple_choice', label: 'ТЕСТ'  },
+              { key: 'code_repair',     label: 'КОД'   },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setFilterType(key)}
+                className={`px-3 py-1 text-xs tracking-widest transition whitespace-nowrap ${
+                  filterType === key ? 'bg-cyber-blue text-black font-bold' : 'text-cyber-muted hover:text-cyber-text'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+
             <div className="ml-auto text-[10px] text-cyber-muted whitespace-nowrap">
               {isCaptain ? '⚡ Капитан' : '👤 Участник'}
             </div>
@@ -168,16 +185,9 @@ export default function Dashboard({
         {/* Right: Active Task Panel */}
         <aside className="w-80 flex-shrink-0 border-l border-cyber-border bg-cyber-panel flex flex-col overflow-hidden hidden md:flex">
           {activeTask ? (
-            <ActiveTaskPanel
-              task={activeTask}
-              result={taskResult}
-              isCaptain={isCaptain}
-              answer={answer}
-              setAnswer={setAnswer}
-              onSubmit={handleSubmit}
-              onAbandon={onAbandon}
-              showHint={showHint}
-              setShowHint={setShowHint}
+            <ActiveTaskDispatcher
+              task={activeTask} result={taskResult} isCaptain={isCaptain}
+              onSubmit={onSubmit} onAbandon={onAbandon}
             />
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-cyber-muted gap-3">
@@ -195,16 +205,9 @@ export default function Dashboard({
       {/* Mobile: Active Task Modal */}
       {activeTask && (
         <div className="md:hidden fixed inset-0 z-40 bg-cyber-dark/95 flex flex-col">
-          <ActiveTaskPanel
-            task={activeTask}
-            result={taskResult}
-            isCaptain={isCaptain}
-            answer={answer}
-            setAnswer={setAnswer}
-            onSubmit={handleSubmit}
-            onAbandon={onAbandon}
-            showHint={showHint}
-            setShowHint={setShowHint}
+          <ActiveTaskDispatcher
+            task={activeTask} result={taskResult} isCaptain={isCaptain}
+            onSubmit={onSubmit} onAbandon={onAbandon}
           />
         </div>
       )}
@@ -212,116 +215,18 @@ export default function Dashboard({
   );
 }
 
-// ── Active Task Panel ─────────────────────────────────────
-function ActiveTaskPanel({ task, result, isCaptain, answer, setAnswer, onSubmit, onAbandon, showHint, setShowHint }) {
-  const resultColor = result
-    ? result.correct
-      ? 'text-cyber-neon border-cyber-neon'
-      : 'text-cyber-red border-cyber-red'
-    : '';
-
-  return (
-    <div className="flex flex-col h-full">
-      {/* Task header */}
-      <div className="border-b border-cyber-border px-4 py-3 flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <Zap size={14} className="text-cyber-blue animate-pulse-neon" />
-          <span className="text-cyber-blue text-xs font-bold tracking-widest">АКТИВНАЯ ЗАДАЧА</span>
-        </div>
-        <div className="flex items-center gap-2 text-[10px]">
-          <span className="text-cyber-muted">УР.{task.level}</span>
-          <span className="text-cyber-muted">·</span>
-          <span className="text-cyber-muted">СЕКТОР {task.sector}</span>
-          <span className="text-cyber-muted">·</span>
-          <span className="text-cyber-muted">#{task.id}</span>
-        </div>
-      </div>
-
-      {/* Lore */}
-      <div className="px-4 py-3 text-[10px] text-cyber-muted italic border-b border-cyber-border flex-shrink-0">
-        <span className="text-cyber-purple">[ЛОРE]</span> {task.lore_description_ru}
-      </div>
-
-      {/* Question */}
-      <div className="px-4 py-4 flex-1 overflow-y-auto">
-        <div className="text-cyber-text text-sm leading-relaxed mb-4">
-          {task.question_ru}
-        </div>
-
-        {/* Hint toggle */}
-        {task.hint_ru && !result?.correct && (
-          <div className="mb-4">
-            <button
-              onClick={() => setShowHint(!showHint)}
-              className="text-[10px] text-cyber-muted hover:text-cyber-yellow flex items-center gap-1"
-            >
-              <AlertTriangle size={10} />
-              {showHint ? 'Скрыть подсказку' : 'Показать подсказку (−10 очков)'}
-            </button>
-            {showHint && (
-              <div className="mt-2 text-[10px] text-cyber-yellow border border-cyber-yellow/30 px-3 py-2 bg-cyber-dark">
-                {task.hint_ru}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Result feedback */}
-        {result && !result.correct && (
-          <div className={`text-xs border px-3 py-2 mb-3 ${resultColor}`}>
-            {result.message_ru}
-          </div>
-        )}
-        {result?.correct && (
-          <div className="text-xs border border-cyber-neon text-cyber-neon px-3 py-2 mb-3 shadow-neon">
-            {result.message_ru}
-          </div>
-        )}
-      </div>
-
-      {/* Answer input */}
-      {!result?.correct && (
-        <div className="border-t border-cyber-border p-4 flex-shrink-0 space-y-2">
-          <input
-            className="w-full bg-cyber-dark border border-cyber-border text-cyber-text px-3 py-2 text-sm focus:outline-none focus:border-cyber-blue"
-            placeholder="Введите ответ…"
-            value={answer}
-            onChange={e => setAnswer(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleKey(e, onSubmit)}
-          />
-          <div className="flex gap-2">
-            <button
-              onClick={onSubmit}
-              disabled={!answer.trim()}
-              className="flex-1 flex items-center justify-center gap-1 py-2 bg-cyber-blue text-black text-xs font-bold tracking-widest hover:opacity-90 transition disabled:opacity-30"
-            >
-              <Send size={12} />
-              ОТПРАВИТЬ
-            </button>
-            {isCaptain && (
-              <button
-                onClick={onAbandon}
-                className="px-3 py-2 border border-cyber-red text-cyber-red text-xs hover:bg-cyber-red hover:text-black transition flex items-center gap-1"
-              >
-                <X size={12} />
-                Покинуть
-              </button>
-            )}
-          </div>
-          {!isCaptain && (
-            <div className="text-[10px] text-cyber-muted text-center">
-              Только капитан может покинуть задачу
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function handleKey(e, onSubmit) {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    onSubmit();
+// ── Активная задача: диспатчер по типу ─────────────────────
+function ActiveTaskDispatcher({ task, result, isCaptain, onSubmit, onAbandon }) {
+  if (task.type === 'multiple_choice') {
+    return <MultipleChoicePanel
+      task={task} result={result} isCaptain={isCaptain}
+      onSubmit={onSubmit} onAbandon={onAbandon} />;
   }
+  if (task.type === 'code_repair') {
+    return <CodeRepairPanel
+      task={task} result={result} isCaptain={isCaptain}
+      onSubmit={onSubmit} onAbandon={onAbandon} />;
+  }
+  return <div className="p-6 text-cyber-red text-xs">Неизвестный тип задачи: {task.type}</div>;
 }
+
