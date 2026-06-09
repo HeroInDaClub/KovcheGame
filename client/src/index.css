@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .text-shadow-neon {
+    text-shadow: 0 0 8px #00f5a0, 0 0 20px #00f5a044;
+  }
+  .text-shadow-blue {
+    text-shadow: 0 0 8px #00c8ff, 0 0 20px #00c8ff44;
+  }
+  .border-glow-neon {
+    border-color: #00f5a0;
+    box-shadow: 0 0 8px #00f5a0, 0 0 20px #00f5a044;
+  }
+  .cyber-grid {
+    background-image:
+      linear-gradient(rgba(0, 200, 255, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0, 200, 255, 0.05) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+}
