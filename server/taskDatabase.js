@@ -264,11 +264,11 @@ const TASKS = [
     hint_ru: 'Стандартный целочисленный тип' },
 
   { id: '40', level: 1, sector: 2, type: 'code_repair', language: 'pascal',
-    lore_description_ru: 'Программа сектора не завершается корректно.',
-    question_ru: 'Какой символ ставится после слова end в конце программы Pascal?',
-    code_snippet: 'begin\n  writeln(\'ok\')\nend▓\n',
-    correct_answer: '.',
-    hint_ru: 'Точка обозначает конец программы' },
+    lore_description_ru: 'Программа сектора сохраняет температуру реактора как дробное значение.',
+    question_ru: 'Какой тип данных описывает вещественное число в Pascal?',
+    code_snippet: 'var temp: ▓▓▓;\nbegin\n  temp := 36.6;\n  writeln(temp)\nend.',
+    correct_answer: 'real',
+    hint_ru: 'Стандартный тип для чисел с плавающей точкой' },
 
   // ════════════════════════════════════════════════
   //  УРОВЕНЬ 2 — Взлом периферии
@@ -925,10 +925,11 @@ const TASKS = [
 
   { id: '143', level: 4, sector: 10, type: 'code_repair', language: 'python',
     lore_description_ru: 'Объект-словарь представляет пользователя.',
-    question_ru: 'Какая конструкция Python — пустой словарь?',
+    question_ru: 'Какая встроенная функция создаст пустой словарь Python?',
     code_snippet: 'users = ▓▓▓\nusers["admin"] = 1\nprint(users)',
-    options: ['{}', '[]', '()', 'set()'],
-    correct_answer: '{}' },
+    options: ['dict()', 'list()', 'set()', 'tuple()'],
+    correct_answer: 'dict()',
+    hint_ru: 'Имя класса + пустые круглые скобки' },
 
   { id: '144', level: 4, sector: 11, type: 'code_repair', language: 'python',
     lore_description_ru: 'Скрипт логирует, если попыток больше N.',
