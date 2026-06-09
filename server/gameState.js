@@ -182,6 +182,63 @@ function pickTask(room, socketId, taskId) {
   return { task, team };
 }
 
+// ── Answer matching ─────────────────────────────────────
+// Three strategies, tried in order:
+//   1) exact     — нормализованный input === нормализованному task.answer
+//   2) alternate — input совпадает с одним из task.acceptedAnswers
+//   3) keywords  — input содержит ≥60% (округление вверх, мин. 1)
+//                  стемов из task.keywords (нечувствительно к порядку)
+// ────────────────────────────────────────────────────────
+
+function normalize(s) {
+  return (s || '')
+    .toString()
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[^а-яa-z0-9\s]/g, ' ')   // strip punctuation, keep letters/digits/space
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function checkAnswer(rawInput, task) {
+  const input = normalize(rawInput);
+  if (!input) return { correct: false };
+
+  // 1. Exact match against canonical answer
+  if (normalize(task.answer) === input) {
+    return { correct: true, mode: 'exact' };
+  }
+
+  // 2. Exact match against any of the accepted alternates
+  if (Array.isArray(task.acceptedAnswers)) {
+    for (const alt of task.acceptedAnswers) {
+      if (normalize(alt) === input) {
+        return { correct: true, mode: 'alternate' };
+      }
+    }
+  }
+
+  // 3. Keyword match (substring; keywords are usually short stems)
+  if (Array.isArray(task.keywords) && task.keywords.length >= 1) {
+    const required = Math.max(1, Math.ceil(task.keywords.length * 0.6));
+    const matched = task.keywords.filter(kw => {
+      const k = normalize(kw);
+      return k && input.includes(k);
+    });
+    if (matched.length >= required) {
+      return {
+        correct:  true,
+        mode:     'keywords',
+        matched:  matched.length,
+        total:    task.keywords.length,
+        required,
+      };
+    }
+  }
+
+  return { correct: false };
+}
+
 function submitAnswer(room, socketId, rawAnswer) {
   const info = getPlayerTeam(room, socketId);
   if (!info) return { error: 'Игрок не найден в команде' };
@@ -196,13 +253,12 @@ function submitAnswer(room, socketId, rawAnswer) {
   const statusEntry = team.taskStatuses[taskId];
   statusEntry.attempts += 1;
 
-  const normalizedAnswer = rawAnswer.toLowerCase().trim();
-  const normalizedCorrect = task.answer.toLowerCase().trim();
-  const correct = normalizedAnswer === normalizedCorrect;
+  const check = checkAnswer(rawAnswer, task);
 
-  if (correct) {
-    statusEntry.status = 'solved';
+  if (check.correct) {
+    statusEntry.status   = 'solved';
     statusEntry.solvedBy = team.teamName;
+    statusEntry.matchMode = check.mode;
     team.activeTaskId = null;
     team.score += getDifficultyPoints(task.level);
 
@@ -214,10 +270,16 @@ function submitAnswer(room, socketId, rawAnswer) {
       if (previousOwner !== team.teamName) team.score += sector.points;
     }
 
+    // Human-readable note on which match strategy triggered
+    let modeNote = '';
+    if (check.mode === 'alternate') modeNote = ' (принят альтернативный вариант)';
+    else if (check.mode === 'keywords') modeNote = ` (по ключевым словам: ${check.matched}/${check.total})`;
+
     return {
       correct: true,
       taskId,
-      message_ru: `✅ Верно! Сектор "${sector?.name_ru}" захвачен командой ${team.teamName}!`,
+      mode: check.mode,
+      message_ru: `✅ Верно!${modeNote} Сектор "${sector?.name_ru}" захвачен командой ${team.teamName}!`,
       newScore: team.score,
       capturedSector: sector,
     };
@@ -275,4 +337,7 @@ module.exports = {
   abandonTask,
   getPublicRoomState,
   deleteRoom,
+  // Exposed for tests + future LLM/teacher-review pipelines
+  normalize,
+  checkAnswer,
 };

@@ -6,12 +6,16 @@ export type DifficultyLevel = 1 | 2 | 3 | 4 | 5;
 export type TaskStatusValue = 'available' | 'in_progress' | 'solved' | 'abandoned';
 export type GamePhase = 'lobby' | 'playing' | 'ended';
 
+export type AnswerMatchMode = 'exact' | 'alternate' | 'keywords';
+
 export interface Task {
   id: number;
   level: DifficultyLevel;
-  sector: number;           // 1-12: maps task to ship sector
+  sector: number;             // 1-12: maps task to ship sector
   question_ru: string;
-  answer: string;           // normalized lowercase, trimmed
+  answer: string;             // canonical correct answer (also used as "model answer" for teachers)
+  acceptedAnswers?: string[]; // optional: alternate phrasings that also score as correct
+  keywords?: string[];        // optional: short stems; ≥60% (min 1) must appear in input → correct
   lore_description_ru: string;
   hint_ru?: string;
 }
@@ -19,8 +23,9 @@ export interface Task {
 export interface TaskStatus {
   taskId: number;
   status: TaskStatusValue;
-  solvedBy?: string;        // teamName
+  solvedBy?: string;          // teamName
   attempts: number;
+  matchMode?: AnswerMatchMode; // how the winning attempt matched (debug/teacher analytics)
 }
 
 export interface Player {
@@ -101,8 +106,10 @@ export interface TaskResultPayload {
   correct: boolean;
   taskId: number;
   message_ru: string;
+  mode?: AnswerMatchMode;     // which strategy accepted the answer (correct=true only)
   newScore?: number;
   capturedSector?: MapSector;
+  attempts?: number;          // populated when correct=false
 }
 
 export interface ErrorPayload {
