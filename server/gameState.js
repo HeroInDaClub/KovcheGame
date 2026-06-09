@@ -45,15 +45,15 @@ function shuffleArray(arr) {
   return a;
 }
 
-// Распределение задач в пуле комнаты:
-//   • 10 задач с каждого уровня → 50 всего
-//   • Внутри уровня: ровно половина multiple_choice, половина code_repair
-//   • Внутри code_repair: языки выбираются по очереди (python → kumir → pascal)
-//     чтобы каждая партия видела все три школьных языка
+// Распределение пула на сессию (50 карт):
+//   4 logic_crypto + 3 multiple_choice + 3 code_repair на уровень × 5 уровней
+//   = 20 logic / 15 MC / 15 CR  → строго 40% / 30% / 30%
+//   Внутри code_repair добиваемся по 1 задаче каждого языка (py + ku + pa).
 function selectTaskPool() {
   const pool = [];
   for (let lvl = 1; lvl <= 5; lvl++) {
     const lvlTasks = TASKS.filter(t => t.level === lvl);
+    const logic    = shuffleArray(lvlTasks.filter(t => t.category === 'logic_crypto'));
     const mc       = shuffleArray(lvlTasks.filter(t => t.type === 'multiple_choice'));
     const codeBy   = {
       python: shuffleArray(lvlTasks.filter(t => t.type === 'code_repair' && t.language === 'python')),
@@ -61,21 +61,27 @@ function selectTaskPool() {
       pascal: shuffleArray(lvlTasks.filter(t => t.type === 'code_repair' && t.language === 'pascal')),
     };
 
-    // целимся в 5 MC + 5 CR (2 py + 2 ku + 1 pa, или ротация)
     const picked = [];
-    picked.push(...mc.slice(0, 5));
+    picked.push(...logic.slice(0, 4));
+    picked.push(...mc.slice(0, 3));
 
+    // CR: один на каждый язык (порядок шафлим, чтобы не было биаса)
     const langOrder = shuffleArray(['python', 'kumir', 'pascal']);
-    let idx = 0;
-    while (picked.length < 10) {
-      const lang = langOrder[idx % 3];
-      const bucket = codeBy[lang];
-      if (bucket.length > 0) picked.push(bucket.shift());
-      idx++;
-      if (idx > 30) break; // safety against tiny pools
+    for (const lang of langOrder) {
+      if (codeBy[lang].length > 0) picked.push(codeBy[lang].shift());
     }
 
-    // если по типу не хватает — добираем из любых оставшихся уровня
+    // Если в каком-то ведре не хватило — добираем тем же типом из других языков
+    while (picked.length < 10) {
+      let added = false;
+      for (const lang of langOrder) {
+        if (picked.length >= 10) break;
+        if (codeBy[lang].length > 0) { picked.push(codeBy[lang].shift()); added = true; }
+      }
+      if (!added) break;
+    }
+
+    // Последний резерв: добираем чем угодно с уровня
     if (picked.length < 10) {
       const remaining = lvlTasks.filter(t => !picked.includes(t));
       picked.push(...shuffleArray(remaining).slice(0, 10 - picked.length));
@@ -193,20 +199,54 @@ function getPlayerTeam(room, socketId) {
 function pickTask(room, socketId, taskId) {
   const info = getPlayerTeam(room, socketId);
   if (!info) return { error: 'Игрок не найден в команде' };
-  const { team, player } = info;
+  const { team } = info;
   if (team.captainId !== socketId) return { error: 'Только капитан может выбирать задачи' };
 
   const task = room.taskPool.find(t => t.id === taskId);
   if (!task) return { error: 'Задача не найдена' };
 
-  const status = team.taskStatuses[taskId];
-  if (status === 'solved')    return { error: 'Задача уже решена' };
-  if (status === 'abandoned') return { error: 'Задача заблокирована' };
+  const st = team.taskStatuses[taskId];
+  if (st?.status === 'solved')    return { error: 'Задача уже решена' };
+  if (st?.status === 'abandoned') return { error: 'Задача покинута' };
+  if (st?.status === 'failed')    return { error: 'Задача заблокирована — сбой' };
   if (team.activeTaskId !== null) return { error: 'У команды уже открыта задача' };
 
   team.activeTaskId = taskId;
-  team.taskStatuses[taskId] = { taskId, status: 'in_progress', attempts: 0 };
+  team.taskStatuses[taskId] = {
+    taskId, status: 'in_progress', attempts: 0, hintsRevealed: 0,
+  };
   return { task, team };
+}
+
+const HINT_PENALTY = 10;
+
+function revealHint(room, socketId, index) {
+  const info = getPlayerTeam(room, socketId);
+  if (!info) return { error: 'Игрок не найден в команде' };
+  const { team } = info;
+  if (team.captainId !== socketId) return { error: 'Подсказки открывает только капитан' };
+  if (team.activeTaskId === null) return { error: 'Нет активной задачи' };
+
+  const taskId = team.activeTaskId;
+  const task = room.taskPool.find(t => t.id === taskId);
+  if (!task) return { error: 'Задача не найдена' };
+  if (!Array.isArray(task.hints) || task.hints.length === 0) {
+    return { error: 'У этой задачи нет подсказок' };
+  }
+  if (typeof index !== 'number' || index < 0 || index >= task.hints.length) {
+    return { error: 'Неверный индекс подсказки' };
+  }
+
+  const st = team.taskStatuses[taskId];
+  st.hintsRevealed = Math.max(st.hintsRevealed || 0, index + 1);
+
+  return {
+    taskId,
+    hintIndex: index,
+    hint_ru: task.hints[index],
+    hintsRevealed: st.hintsRevealed,
+    penaltyPerHint: HINT_PENALTY,
+  };
 }
 
 // ── Answer matching ─────────────────────────────────────
@@ -301,19 +341,25 @@ function submitAnswer(room, socketId, rawAnswer) {
   const task = room.taskPool.find(t => t.id === taskId);
   if (!task) return { error: 'Задача не найдена' };
 
-  const statusEntry = team.taskStatuses[taskId];
-  statusEntry.attempts += 1;
+  const st = team.taskStatuses[taskId];
+  st.attempts += 1;
 
   const check = checkAnswer(rawAnswer, task);
 
   if (check.correct) {
-    statusEntry.status   = 'solved';
-    statusEntry.solvedBy = team.teamName;
-    statusEntry.matchMode = check.mode;
+    st.status    = 'solved';
+    st.solvedBy  = team.teamName;
+    st.matchMode = check.mode;
     team.activeTaskId = null;
-    team.score += getDifficultyPoints(task.level);
 
-    // Capture sector
+    // Базовая награда минус штраф за подсказки (но не ниже нуля)
+    const base        = getDifficultyPoints(task.level);
+    const hintsUsed   = st.hintsRevealed || 0;
+    const hintPenalty = Math.min(base, hintsUsed * HINT_PENALTY);
+    const earned      = base - hintPenalty;
+    team.score += earned;
+
+    // Захват сектора (бонус сектора штрафами НЕ режется)
     const sector = room.mapSectors.find(s => s.id === task.sector);
     const previousOwner = sector ? sector.capturedBy : null;
     if (sector) {
@@ -321,27 +367,48 @@ function submitAnswer(room, socketId, rawAnswer) {
       if (previousOwner !== team.teamName) team.score += sector.points;
     }
 
-    // Human-readable note on which match strategy triggered
     let modeNote = '';
-    if (check.mode === 'alternate') modeNote = ' (принят альтернативный вариант)';
-    else if (check.mode === 'keywords') modeNote = ` (по ключевым словам: ${check.matched}/${check.total})`;
+    if (check.mode === 'alternate') modeNote = ' (альт. вариант)';
+    else if (check.mode === 'keywords') modeNote = ` (ключи ${check.matched}/${check.total})`;
+    const hintNote = hintPenalty > 0 ? ` · −${hintPenalty} за подсказки` : '';
 
     return {
       correct: true,
       taskId,
       mode: check.mode,
-      message_ru: `✅ Верно!${modeNote} Сектор "${sector?.name_ru}" захвачен командой ${team.teamName}!`,
-      newScore: team.score,
+      message_ru: `✅ Верно!${modeNote}${hintNote} Сектор «${sector?.name_ru}» захвачен!`,
+      newScore:       team.score,
       capturedSector: sector,
+      hintPenalty,
     };
-  } else {
+  }
+
+  // ── Неверный ответ ──
+
+  // ОДНА ПОПЫТКА на multiple_choice → мгновенная блокировка как 'failed'
+  if (task.type === 'multiple_choice') {
+    st.status        = 'failed';
+    st.failedAnswer  = String(rawAnswer);
+    team.activeTaskId = null;
     return {
       correct: false,
       taskId,
-      message_ru: `❌ Неверно. Попытка ${statusEntry.attempts}. Попробуйте ещё раз или покиньте задачу.`,
-      attempts: statusEntry.attempts,
+      message_ru: `❌ Сбой системы! Задача заблокирована. Правильно было: «${task.correct_answer}»`,
+      submittedAnswer: String(rawAnswer),
+      correctAnswer:   task.correct_answer,
+      attempts:        st.attempts,
+      locked:          true,
     };
   }
+
+  // Для code_repair и text_phrase — попытки не ограничены
+  return {
+    correct: false,
+    taskId,
+    message_ru:      `❌ Неверно. Попытка ${st.attempts}. Попробуйте ещё раз или покиньте задачу.`,
+    submittedAnswer: String(rawAnswer),
+    attempts:        st.attempts,
+  };
 }
 
 function abandonTask(room, socketId) {
@@ -386,6 +453,8 @@ module.exports = {
   pickTask,
   submitAnswer,
   abandonTask,
+  revealHint,
+  HINT_PENALTY,
   getPublicRoomState,
   deleteRoom,
   // Exposed for tests + future LLM/teacher-review pipelines

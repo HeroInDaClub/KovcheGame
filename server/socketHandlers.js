@@ -154,6 +154,27 @@ function registerHandlers(io, socket) {
     }
   });
 
+  // ── REQUEST HINT (Captain only, −10 очков за каждую) ────
+  socket.on('request_hint', ({ index } = {}) => {
+    const roomId = socket.data.roomId;
+    const room = gs.getRoom(roomId);
+    if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
+    if (room.phase !== 'playing') return socket.emit('error', { message_ru: 'Игра не активна', code: 'GAME_NOT_ACTIVE' });
+
+    const result = gs.revealHint(room, socket.id, index);
+    if (result.error) return socket.emit('error', { message_ru: result.error, code: 'HINT_ERROR' });
+
+    const playerTeam = gs.getPlayerTeam(room, socket.id);
+    log(`Команда "${playerTeam?.team.teamName}" открыла подсказку #${result.hintIndex + 1} к задаче ${result.taskId}`);
+
+    if (playerTeam) {
+      for (const member of playerTeam.team.members) {
+        io.to(member.id).emit('hint_revealed', result);
+      }
+    }
+    io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
+  });
+
   // ── ABANDON TASK ─────────────────────────────────────────
   socket.on('abandon_task', () => {
     const roomId = socket.data.roomId;

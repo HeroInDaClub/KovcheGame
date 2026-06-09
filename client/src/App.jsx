@@ -23,6 +23,9 @@ export default function App() {
   const [activeTask, setActiveTask] = useState(null);
   const [taskResult, setTaskResult] = useState(null);
   const [gameOver,   setGameOver]   = useState(null);
+  // Подсказки: индекс «сколько раскрыли» + кеш самих текстов от сервера
+  const [hintsRevealed, setHintsRevealed] = useState(0);
+  const [revealedHints, setRevealedHints] = useState({});  // { [idx]: text }
   const [notification, setNotif]   = useState('');
 
   const notify = useCallback((msg, duration = 4000) => {
@@ -64,15 +67,23 @@ export default function App() {
     socket.on('task_opened', ({ task, openedBy }) => {
       setActiveTask(task);
       setTaskResult(null);
+      setHintsRevealed(0);
+      setRevealedHints({});
       notify(`📂 Капитан ${openedBy} открыл задачу: ${task.question_ru.slice(0, 40)}…`);
     });
 
     socket.on('task_result', (result) => {
       setTaskResult(result);
-      if (result.correct) {
+      if (result.correct || result.locked) {
+        // Верный ответ ИЛИ MC-провал (one-shot) → закрываем активную задачу
         setActiveTask(null);
-        notify(result.message_ru, 5000);
+        notify(result.message_ru, 6000);
       }
+    });
+
+    socket.on('hint_revealed', ({ hintIndex, hint_ru, hintsRevealed: count }) => {
+      setHintsRevealed(count);
+      setRevealedHints(prev => ({ ...prev, [hintIndex]: hint_ru }));
     });
 
     socket.on('task_abandoned', ({ message_ru }) => {
@@ -116,13 +127,16 @@ export default function App() {
         timer={timer ?? roomState.globalTimer}
         activeTask={activeTask}
         taskResult={taskResult}
+        hintsRevealed={hintsRevealed}
+        revealedHints={revealedHints}
         playerName={playerName}
         isAdmin={isAdmin}
         notification={notification}
-        onPickTask={(taskId)  => socket.emit('pick_task', { taskId })}
-        onSubmit={(answer)    => socket.emit('submit_answer', { answer })}
-        onAbandon={()         => socket.emit('abandon_task')}
-        onStartGame={()       => socket.emit('start_game')}
+        onPickTask={(taskId)    => socket.emit('pick_task', { taskId })}
+        onSubmit={(answer)      => socket.emit('submit_answer', { answer })}
+        onAbandon={()           => socket.emit('abandon_task')}
+        onStartGame={()         => socket.emit('start_game')}
+        onRequestHint={(index)  => socket.emit('request_hint', { index })}
       />
     );
   }

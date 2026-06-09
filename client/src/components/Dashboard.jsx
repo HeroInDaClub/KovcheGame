@@ -5,6 +5,7 @@ import TaskCard            from './TaskCard.jsx';
 import Leaderboard         from './Leaderboard.jsx';
 import MultipleChoicePanel from './MultipleChoicePanel.jsx';
 import CodeRepairPanel     from './CodeRepairPanel.jsx';
+import TextPhrasePanel     from './TextPhrasePanel.jsx';
 
 const LEVEL_LABELS = ['', 'Уровень 1', 'Уровень 2', 'Уровень 3', 'Уровень 4', 'Уровень 5'];
 const LEVEL_COLORS = ['', '#4ae54a', '#99ff44', '#ffd60a', '#ff9f0a', '#ff2d55'];
@@ -18,8 +19,9 @@ function formatTime(seconds) {
 
 export default function Dashboard({
   roomState, timer, activeTask, taskResult,
+  hintsRevealed, revealedHints,
   playerName, isAdmin, notification,
-  onPickTask, onSubmit, onAbandon, onStartGame,
+  onPickTask, onSubmit, onAbandon, onStartGame, onRequestHint,
 }) {
   const [filterLevel, setFilterLevel] = useState(0);
   const [filterType,  setFilterType]  = useState('all'); // all | multiple_choice | code_repair
@@ -37,6 +39,11 @@ export default function Dashboard({
     for (const t of roomState.taskPool) {
       if (filterType !== 'all' && t.type !== filterType) continue;
       groups[t.level].push(t);
+    }
+    // Сортировка внутри уровня: логика → MC → код (для удобного скана)
+    const order = { text_phrase: 0, multiple_choice: 1, code_repair: 2 };
+    for (const lvl of Object.keys(groups)) {
+      groups[lvl].sort((a, b) => (order[a.type] ?? 9) - (order[b.type] ?? 9));
     }
     return groups;
   }, [roomState.taskPool, filterType]);
@@ -134,9 +141,10 @@ export default function Dashboard({
             {/* Type filter */}
             <div className="border-l border-cyber-border h-4 mx-1" />
             {[
-              { key: 'all',             label: 'ТИП: ВСЕ' },
-              { key: 'multiple_choice', label: 'ТЕСТ'  },
-              { key: 'code_repair',     label: 'КОД'   },
+              { key: 'all',             label: 'ВСЕ'    },
+              { key: 'text_phrase',     label: 'ЛОГИКА' },
+              { key: 'multiple_choice', label: 'ТЕСТ'   },
+              { key: 'code_repair',     label: 'КОД'    },
             ].map(({ key, label }) => (
               <button
                 key={key}
@@ -187,7 +195,8 @@ export default function Dashboard({
           {activeTask ? (
             <ActiveTaskDispatcher
               task={activeTask} result={taskResult} isCaptain={isCaptain}
-              onSubmit={onSubmit} onAbandon={onAbandon}
+              hintsRevealed={hintsRevealed} revealedHints={revealedHints}
+              onSubmit={onSubmit} onAbandon={onAbandon} onRequestHint={onRequestHint}
             />
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-cyber-muted gap-3">
@@ -216,17 +225,11 @@ export default function Dashboard({
 }
 
 // ── Активная задача: диспатчер по типу ─────────────────────
-function ActiveTaskDispatcher({ task, result, isCaptain, onSubmit, onAbandon }) {
-  if (task.type === 'multiple_choice') {
-    return <MultipleChoicePanel
-      task={task} result={result} isCaptain={isCaptain}
-      onSubmit={onSubmit} onAbandon={onAbandon} />;
-  }
-  if (task.type === 'code_repair') {
-    return <CodeRepairPanel
-      task={task} result={result} isCaptain={isCaptain}
-      onSubmit={onSubmit} onAbandon={onAbandon} />;
-  }
+function ActiveTaskDispatcher({ task, result, isCaptain, hintsRevealed, revealedHints, onSubmit, onAbandon, onRequestHint }) {
+  const common = { task, result, isCaptain, hintsRevealed, revealedHints, onSubmit, onAbandon, onRequestHint };
+  if (task.type === 'multiple_choice') return <MultipleChoicePanel {...common} />;
+  if (task.type === 'code_repair')     return <CodeRepairPanel     {...common} />;
+  if (task.type === 'text_phrase')     return <TextPhrasePanel     {...common} />;
   return <div className="p-6 text-cyber-red text-xs">Неизвестный тип задачи: {task.type}</div>;
 }
 

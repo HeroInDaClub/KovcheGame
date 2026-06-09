@@ -1,10 +1,11 @@
-import { Lock, CheckCircle, Circle, Loader, Star, ListChecks, Code2 } from 'lucide-react';
+import { Lock, CheckCircle, Circle, Loader, Star, ListChecks, Code2, Brain, AlertOctagon } from 'lucide-react';
 
 const STATUS_CONFIG = {
-  available:   { icon: Circle,      color: 'text-cyber-muted',   border: 'border-cyber-border',  label: 'Доступна' },
-  in_progress: { icon: Loader,      color: 'text-cyber-blue',    border: 'border-cyber-blue',    label: 'В процессе' },
-  solved:      { icon: CheckCircle, color: 'text-cyber-neon',    border: 'border-cyber-neon',    label: 'Решена' },
-  abandoned:   { icon: Lock,        color: 'text-cyber-red',     border: 'border-cyber-red',     label: 'Заблокирована' },
+  available:   { icon: Circle,       color: 'text-cyber-muted',  border: 'border-cyber-border',  label: 'Доступна' },
+  in_progress: { icon: Loader,       color: 'text-cyber-blue',   border: 'border-cyber-blue',    label: 'В процессе' },
+  solved:      { icon: CheckCircle,  color: 'text-cyber-neon',   border: 'border-cyber-neon',    label: 'Решена' },
+  abandoned:   { icon: Lock,         color: 'text-cyber-red',    border: 'border-cyber-red',     label: 'Покинута' },
+  failed:      { icon: AlertOctagon, color: 'text-cyber-red',    border: 'border-cyber-red',     label: 'Сбой' },
 };
 
 const LEVEL_COLORS = ['', 'text-[#4ae54a]', 'text-[#99ff44]', 'text-cyber-yellow', 'text-[#ff9f0a]', 'text-cyber-red'];
@@ -50,11 +51,17 @@ export default function TaskCard({ task, status = 'available', isCaptain, onPick
 
       {/* Type badge row */}
       <div className="flex items-center gap-1 mb-1">
-        {task.type === 'multiple_choice' ? (
-          <span className="flex items-center gap-1 text-[9px] tracking-widest border border-cyber-blue text-cyber-blue px-1 py-px">
-            <ListChecks size={8} /> ТЕСТ
+        {task.type === 'text_phrase' && (
+          <span className="flex items-center gap-1 text-[9px] tracking-widest border border-cyber-yellow text-cyber-yellow px-1 py-px">
+            <Brain size={8} /> ЛОГИКА
           </span>
-        ) : (
+        )}
+        {task.type === 'multiple_choice' && (
+          <span className="flex items-center gap-1 text-[9px] tracking-widest border border-cyber-blue text-cyber-blue px-1 py-px">
+            <ListChecks size={8} /> ТЕСТ · 1
+          </span>
+        )}
+        {task.type === 'code_repair' && (
           <>
             <span className="flex items-center gap-1 text-[9px] tracking-widest border border-cyber-purple text-cyber-purple px-1 py-px">
               <Code2 size={8} /> КОД
@@ -68,19 +75,21 @@ export default function TaskCard({ task, status = 'available', isCaptain, onPick
         )}
       </div>
 
-      {/* Preview (truncated): для code_repair — кусок кода, иначе — вопрос */}
-      <div className={`leading-tight ${status === 'abandoned' ? 'text-cyber-muted line-through' : 'text-cyber-text'}`}>
-        {status === 'abandoned'
-          ? <span className="text-cyber-red text-[10px] tracking-widest">// ЗАБЛОКИРОВАНА</span>
-          : status === 'solved'
-            ? <span className="text-cyber-neon text-[10px] tracking-widest">// РЕШЕНА ✓</span>
-            : task.type === 'code_repair'
-              ? <code className="block bg-cyber-black px-1 py-0.5 text-[9.5px] text-cyber-blue/80 truncate font-mono">
-                  {(task.code_snippet || '').split('\n').find(l => l.includes('▓▓▓'))?.trim() || task.question_ru.slice(0, 50) + '…'}
-                </code>
-              : task.question_ru.length > 55
-                ? task.question_ru.slice(0, 55) + '…'
-                : task.question_ru
+      {/* Preview (truncated) */}
+      <div className={`leading-tight ${status === 'abandoned' || status === 'failed' ? 'text-cyber-muted line-through' : 'text-cyber-text'}`}>
+        {status === 'failed'
+          ? <span className="text-cyber-red text-[10px] tracking-widest">// СБОЙ ✗</span>
+          : status === 'abandoned'
+            ? <span className="text-cyber-red text-[10px] tracking-widest">// ПОКИНУТА</span>
+            : status === 'solved'
+              ? <span className="text-cyber-neon text-[10px] tracking-widest">// РЕШЕНА ✓</span>
+              : task.type === 'code_repair'
+                ? <code className="block bg-cyber-black px-1 py-0.5 text-[9.5px] text-cyber-blue/80 truncate font-mono">
+                    {(task.code_snippet || '').split('\n').find(l => l.includes('▓▓▓'))?.trim() || task.question_ru.slice(0, 50) + '…'}
+                  </code>
+                : task.question_ru.length > 55
+                  ? task.question_ru.slice(0, 55) + '…'
+                  : task.question_ru
         }
       </div>
 
