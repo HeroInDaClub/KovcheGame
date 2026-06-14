@@ -8,11 +8,22 @@ function registerHandlers(io, socket) {
   const log = (msg) => console.log(`[${new Date().toISOString()}] [${socket.id.slice(0, 8)}] ${msg}`);
 
   // ── CREATE ROOM (Admin/Teacher) ──────────────────────────
-  socket.on('create_room', ({ adminName, gameDurationMinutes = 45 } = {}) => {
+  socket.on('create_room', ({
+    adminName,
+    gameDurationMinutes = 45,
+    maxTeams            = 4,
+    totalTasksCount     = 50,
+    difficultyPreset    = 'balanced',
+  } = {}) => {
     if (!adminName?.trim()) {
       return socket.emit('error', { message_ru: 'Укажите имя администратора', code: 'MISSING_NAME' });
     }
-    const room = gs.createRoom(socket.id, adminName.trim(), gameDurationMinutes);
+    const room = gs.createRoom(socket.id, adminName.trim(), {
+      gameDurationMinutes,
+      maxTeams,
+      totalTasksCount,
+      difficultyPreset,
+    });
     socket.join(room.roomId);
     log(`Создана комната ${room.roomId} администратором "${adminName}"`);
     socket.emit('room_created', { roomId: room.roomId });

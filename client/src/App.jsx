@@ -172,11 +172,16 @@ export default function App() {
       <AdminPanel
         notification={notification}
         roomId={roomId}
-        onCreateRoom={({ adminName, duration }) => {
+        onCreateRoom={({ adminName, duration, maxTeams, totalTasksCount, difficultyPreset }) => {
           setPlayerName(adminName);
           setIsAdmin(true);
-          socket.emit('create_room', { adminName, gameDurationMinutes: duration });
-          // AdminPanel handles the join_room after room_created fires
+          socket.emit('create_room', {
+            adminName,
+            gameDurationMinutes: duration,
+            maxTeams,
+            totalTasksCount,
+            difficultyPreset,
+          });
         }}
       />
     );

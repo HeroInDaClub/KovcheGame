@@ -4,12 +4,54 @@
 
 const { TASKS } = require('./taskDatabase');
 
-const TEAM_CONFIGS = [
-  { name: 'Альфа',  color: '#00f5a0', glow: '#00f5a044' },
-  { name: 'Бета',   color: '#00c8ff', glow: '#00c8ff44' },
-  { name: 'Гамма',  color: '#9b30ff', glow: '#9b30ff44' },
-  { name: 'Дельта', color: '#ffd60a', glow: '#ffd60a44' },
+// До 25 команд — в кибер/греческой тематике, каждая с уникальным неон-цветом
+const ALL_TEAM_CONFIGS = [
+  { name: 'Альфа',   color: '#00f5a0', glow: '#00f5a044' },
+  { name: 'Бета',    color: '#00c8ff', glow: '#00c8ff44' },
+  { name: 'Гамма',   color: '#9b30ff', glow: '#9b30ff44' },
+  { name: 'Дельта',  color: '#ffd60a', glow: '#ffd60a44' },
+  { name: 'Эпсилон', color: '#ff2d55', glow: '#ff2d5544' },
+  { name: 'Зета',    color: '#ff9f0a', glow: '#ff9f0a44' },
+  { name: 'Эта',     color: '#30d158', glow: '#30d15844' },
+  { name: 'Тета',    color: '#64d2ff', glow: '#64d2ff44' },
+  { name: 'Йота',    color: '#bf5af2', glow: '#bf5af244' },
+  { name: 'Каппа',   color: '#ff6b35', glow: '#ff6b3544' },
+  { name: 'Лямбда',  color: '#4ae54a', glow: '#4ae54a44' },
+  { name: 'Мю',      color: '#5e5ce6', glow: '#5e5ce644' },
+  { name: 'Ню',      color: '#ff375f', glow: '#ff375f44' },
+  { name: 'Кси',     color: '#32ade6', glow: '#32ade644' },
+  { name: 'Омикрон', color: '#ffcc02', glow: '#ffcc0244' },
+  { name: 'Пи',      color: '#ff6961', glow: '#ff696144' },
+  { name: 'Ро',      color: '#4ecdc4', glow: '#4ecdc444' },
+  { name: 'Сигма',   color: '#c44dff', glow: '#c44dff44' },
+  { name: 'Тау',     color: '#ff4081', glow: '#ff408144' },
+  { name: 'Омега',   color: '#00e5ff', glow: '#00e5ff44' },
+  { name: 'Призрак', color: '#a8ff78', glow: '#a8ff7844' },
+  { name: 'Нова',    color: '#f7971e', glow: '#f7971e44' },
+  { name: 'Нексус',  color: '#ee0979', glow: '#ee097944' },
+  { name: 'Феникс',  color: '#fc4a1a', glow: '#fc4a1a44' },
+  { name: 'Кибер',   color: '#12c2e9', glow: '#12c2e944' },
 ];
+
+// Весовые коэффициенты уровней 1-5 по пресету сложности
+const DIFFICULTY_WEIGHTS = {
+  balanced: [1,   1,   1,    1,   1  ],
+  easy:     [3.5, 3,   2,    1,   0.5],
+  hardcore: [0.5, 1,   2,    3,   3.5],
+};
+
+// Метод наибольших остатков — пропорциональное распределение без дробей
+function distributeByWeight(weights, total) {
+  const sum = weights.reduce((s, w) => s + w, 0);
+  const raw = weights.map(w => (w / sum) * total);
+  const floored = raw.map(Math.floor);
+  let remainder = total - floored.reduce((s, n) => s + n, 0);
+  raw.map((r, i) => ({ i, frac: r - Math.floor(r) }))
+    .sort((a, b) => b.frac - a.frac)
+    .slice(0, remainder)
+    .forEach(({ i }) => { floored[i] += 1; });
+  return floored;
+}
 
 const MAP_SECTORS = [
   { id: 1,  name_ru: 'Шлюзовой Отсек',       capturedBy: null, points: 100 },
@@ -45,13 +87,19 @@ function shuffleArray(arr) {
   return a;
 }
 
-// Распределение пула на сессию (50 карт):
-//   4 logic_crypto + 3 multiple_choice + 3 code_repair на уровень × 5 уровней
-//   = 20 logic / 15 MC / 15 CR  → строго 40% / 30% / 30%
-//   Внутри code_repair добиваемся по 1 задаче каждого языка (py + ku + pa).
-function selectTaskPool() {
+// Пропорция типов внутри уровня: 40% logic_crypto, 30% multiple_choice, 30% code_repair
+// code_repair равномерно по языкам (python / kumir / pascal).
+// Если задач конкретного типа не хватает — добираем из остатка того же уровня.
+function selectTaskPool(totalTasksCount = 50, difficultyPreset = 'balanced') {
+  const weights   = DIFFICULTY_WEIGHTS[difficultyPreset] ?? DIFFICULTY_WEIGHTS.balanced;
+  const perLevel  = distributeByWeight(weights, totalTasksCount); // [n1, n2, n3, n4, n5]
+
   const pool = [];
+
   for (let lvl = 1; lvl <= 5; lvl++) {
+    let count = Math.min(perLevel[lvl - 1], TASKS.filter(t => t.level === lvl).length);
+    if (count <= 0) continue;
+
     const lvlTasks = TASKS.filter(t => t.level === lvl);
     const logic    = shuffleArray(lvlTasks.filter(t => t.category === 'logic_crypto'));
     const mc       = shuffleArray(lvlTasks.filter(t => t.type === 'multiple_choice'));
@@ -61,48 +109,65 @@ function selectTaskPool() {
       pascal: shuffleArray(lvlTasks.filter(t => t.type === 'code_repair' && t.language === 'pascal')),
     };
 
-    const picked = [];
-    picked.push(...logic.slice(0, 4));
-    picked.push(...mc.slice(0, 3));
+    // Целевые квоты (40/30/30), зажатые до реального наличия
+    const allCode  = codeBy.python.length + codeBy.kumir.length + codeBy.pascal.length;
+    let logicQ = Math.min(Math.round(count * 0.4), logic.length);
+    let mcQ    = Math.min(Math.round(count * 0.3), mc.length);
+    let codeQ  = Math.min(count - logicQ - mcQ,   allCode);
 
-    // CR: один на каждый язык (порядок шафлим, чтобы не было биаса)
+    const picked = [
+      ...logic.slice(0, logicQ),
+      ...mc.slice(0, mcQ),
+    ];
+
+    // CR: балансируем по языкам (Round-Robin)
     const langOrder = shuffleArray(['python', 'kumir', 'pascal']);
-    for (const lang of langOrder) {
-      if (codeBy[lang].length > 0) picked.push(codeBy[lang].shift());
-    }
-
-    // Если в каком-то ведре не хватило — добираем тем же типом из других языков
-    while (picked.length < 10) {
-      let added = false;
+    let added = 0;
+    while (added < codeQ) {
+      let anyAdded = false;
       for (const lang of langOrder) {
-        if (picked.length >= 10) break;
-        if (codeBy[lang].length > 0) { picked.push(codeBy[lang].shift()); added = true; }
+        if (added >= codeQ) break;
+        if (codeBy[lang].length > 0) { picked.push(codeBy[lang].shift()); added++; anyAdded = true; }
       }
-      if (!added) break;
+      if (!anyAdded) break;
     }
 
-    // Последний резерв: добираем чем угодно с уровня
-    if (picked.length < 10) {
-      const remaining = lvlTasks.filter(t => !picked.includes(t));
-      picked.push(...shuffleArray(remaining).slice(0, 10 - picked.length));
+    // Если после квот не хватает — добираем чем угодно с этого уровня
+    if (picked.length < count) {
+      const usedIds  = new Set(picked.map(t => t.id));
+      const leftover = shuffleArray(lvlTasks.filter(t => !usedIds.has(t.id)));
+      picked.push(...leftover.slice(0, count - picked.length));
     }
-    pool.push(...picked);
+
+    pool.push(...picked.slice(0, count));
   }
+
   return shuffleArray(pool);
 }
 
-function createRoom(adminId, adminName, gameDurationMinutes = 45) {
+function createRoom(adminId, adminName, {
+  gameDurationMinutes = 45,
+  maxTeams            = 4,
+  totalTasksCount     = 50,
+  difficultyPreset    = 'balanced',
+} = {}) {
+  // ── Валидация параметров ────────────────────────────────
+  gameDurationMinutes = Math.max(5,  Math.min(120, parseInt(gameDurationMinutes) || 45));
+  maxTeams            = Math.max(2,  Math.min(25,  parseInt(maxTeams)            ||  4));
+  totalTasksCount     = Math.max(20, Math.min(100, parseInt(totalTasksCount)     || 50));
+  if (!DIFFICULTY_WEIGHTS[difficultyPreset]) difficultyPreset = 'balanced';
+
   let roomId;
   do { roomId = generateRoomId(); } while (rooms.has(roomId));
 
   const teams = {};
-  for (const cfg of TEAM_CONFIGS) {
+  for (const cfg of ALL_TEAM_CONFIGS.slice(0, maxTeams)) {
     teams[cfg.name] = {
-      teamName:    cfg.name,
-      color:       cfg.color,
-      score:       0,
-      captainId:   null,
-      members:     [],
+      teamName:     cfg.name,
+      color:        cfg.color,
+      score:        0,
+      captainId:    null,
+      members:      [],
       activeTaskId: null,
       taskStatuses: {},
     };
@@ -112,14 +177,17 @@ function createRoom(adminId, adminName, gameDurationMinutes = 45) {
     roomId,
     adminId,
     adminName,
-    phase:          'lobby',
-    globalTimer:    gameDurationMinutes * 60,
-    gameDuration:   gameDurationMinutes * 60,
-    timerInterval:  null,
+    phase:           'lobby',
+    globalTimer:     gameDurationMinutes * 60,
+    gameDuration:    gameDurationMinutes * 60,
+    timerInterval:   null,
+    maxTeams,
+    totalTasksCount,
+    difficultyPreset,
     teams,
-    taskPool:       selectTaskPool(),
-    mapSectors:     MAP_SECTORS.map(s => ({ ...s })),
-    createdAt:      new Date().toISOString(),
+    taskPool:        selectTaskPool(totalTasksCount, difficultyPreset),
+    mapSectors:      MAP_SECTORS.map(s => ({ ...s })),
+    createdAt:       new Date().toISOString(),
   };
 
   rooms.set(roomId, room);

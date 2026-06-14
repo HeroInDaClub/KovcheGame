@@ -2,6 +2,7 @@ import { Trophy, Users, Target } from 'lucide-react';
 
 export default function Leaderboard({ teams, mapSectors }) {
   const ranked = Object.values(teams)
+    .filter(t => t.members.length > 0)   // только команды с игроками
     .map(t => ({
       ...t,
       captured: mapSectors.filter(s => s.capturedBy === t.teamName).length,
@@ -16,7 +17,7 @@ export default function Leaderboard({ teams, mapSectors }) {
         <span className="text-cyber-yellow text-xs font-bold tracking-widest">ТАБЛИЦА ЛИДЕРОВ</span>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-2 overflow-y-auto max-h-64 pr-1">
         {ranked.map((team, idx) => (
           <div key={team.teamName} className="flex items-center gap-3">
             {/* Rank */}
