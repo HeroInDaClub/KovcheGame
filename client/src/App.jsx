@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { socket, connect, disconnect } from './socket.js';
-import AdminPanel  from './components/AdminPanel.jsx';
-import Lobby       from './components/Lobby.jsx';
-import Dashboard   from './components/Dashboard.jsx';
-import GameOver    from './components/GameOver.jsx';
+import AdminPanel       from './components/AdminPanel.jsx';
+import Lobby            from './components/Lobby.jsx';
+import Dashboard        from './components/Dashboard.jsx';
+import TeacherDashboard from './components/TeacherDashboard.jsx';
+import GameOver         from './components/GameOver.jsx';
 
 // ── App-level view states ────────────────────────────────
 // 'entry'    → Choose: Admin or Player
@@ -121,6 +122,17 @@ export default function App() {
   }
 
   if (view === 'playing' && roomState) {
+    if (isAdmin) {
+      return (
+        <TeacherDashboard
+          roomState={roomState}
+          timer={timer ?? roomState.globalTimer}
+          isAdmin={isAdmin}
+          notification={notification}
+          onStartGame={() => socket.emit('start_game')}
+        />
+      );
+    }
     return (
       <Dashboard
         roomState={roomState}

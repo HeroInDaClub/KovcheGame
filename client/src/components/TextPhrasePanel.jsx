@@ -36,7 +36,13 @@ export default function TextPhrasePanel({ task, result, isCaptain, hintsRevealed
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-        <div className="text-cyber-text text-sm leading-snug">{task.question_ru}</div>
+        <div className="text-cyber-text text-sm leading-snug whitespace-pre-wrap">{task.question_ru}</div>
+
+        {task.code_snippet && (
+          <pre className="bg-cyber-black border border-cyber-border text-cyber-blue text-[11px] font-mono p-3 overflow-x-auto whitespace-pre leading-relaxed">
+            {task.code_snippet}
+          </pre>
+        )}
 
         <HintsBlock task={task} hintsRevealed={hintsRevealed} revealedHints={revealedHints}
                     canReveal={!solved && isCaptain} onRequestHint={onRequestHint} />
