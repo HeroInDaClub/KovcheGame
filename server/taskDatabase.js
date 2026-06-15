@@ -1458,4 +1458,49 @@ const TASKS = [
     ] },
 ];
 
-module.exports = { TASKS };
+// ── Custom tasks: load from file on startup ──────────────
+const fs   = require('fs');
+const path = require('path');
+const CUSTOM_PATH = path.join(__dirname, 'customTasks.json');
+
+try {
+  const custom = JSON.parse(fs.readFileSync(CUSTOM_PATH, 'utf8'));
+  TASKS.push(...custom);
+} catch {}
+
+function _saveCustom() {
+  fs.writeFileSync(CUSTOM_PATH, JSON.stringify(
+    TASKS.filter(t => t.isCustom), null, 2
+  ));
+}
+
+function addCustomTask(data) {
+  const maxId = Math.max(0, ...TASKS.map(t => parseInt(t.id) || 0));
+  const task = {
+    id:                  String(maxId + 1),
+    level:               data.level,
+    sector:              data.level,
+    type:                data.type,
+    category:            data.category,
+    question_ru:         data.question_ru,
+    correct_answer:      data.correct_answer,
+    hints:               data.hints || [],
+    isCustom:            true,
+    ...(data.options       && { options: data.options }),
+    ...(data.code_snippet  && { code_snippet: data.code_snippet }),
+    ...(data.lore_description_ru && { lore_description_ru: data.lore_description_ru }),
+  };
+  TASKS.push(task);
+  _saveCustom();
+  return task;
+}
+
+function removeCustomTask(id) {
+  const idx = TASKS.findIndex(t => t.id === id && t.isCustom);
+  if (idx === -1) return false;
+  TASKS.splice(idx, 1);
+  _saveCustom();
+  return true;
+}
+
+module.exports = { TASKS, addCustomTask, removeCustomTask };

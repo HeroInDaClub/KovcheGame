@@ -3,9 +3,34 @@
 // ============================================================
 
 const gs = require('./gameState');
+const { TASKS, addCustomTask, removeCustomTask } = require('./taskDatabase');
+
+// Пароль учителя. Задаётся через переменную окружения ADMIN_PASSWORD,
+// иначе используется значение по умолчанию (ОБЯЗАТЕЛЬНО смените на проде!).
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'aegis-teacher';
 
 function registerHandlers(io, socket) {
   const log = (msg) => console.log(`[${new Date().toISOString()}] [${socket.id.slice(0, 8)}] ${msg}`);
+
+  // Проверка прав учителя — socket.data.isAdmin ставится только после admin_auth
+  const requireAdmin = () => {
+    if (!socket.data.isAdmin) {
+      socket.emit('error', { message_ru: 'Требуется авторизация учителя', code: 'NOT_AUTHORIZED' });
+      return false;
+    }
+    return true;
+  };
+
+  // ── ADMIN AUTH (пароль-гейт панели учителя) ──────────────
+  socket.on('admin_auth', ({ password } = {}) => {
+    if (password !== ADMIN_PASSWORD) {
+      log('Неудачная попытка входа в панель учителя');
+      return socket.emit('admin_auth_result', { ok: false, message_ru: 'Неверный пароль учителя' });
+    }
+    socket.data.isAdmin = true;
+    log('Учитель авторизован');
+    socket.emit('admin_auth_result', { ok: true });
+  });
 
   // ── CREATE ROOM (Admin/Teacher) ──────────────────────────
   socket.on('create_room', ({
@@ -15,6 +40,7 @@ function registerHandlers(io, socket) {
     totalTasksCount     = 50,
     difficultyPreset    = 'balanced',
   } = {}) => {
+    if (!requireAdmin()) return;
     if (!adminName?.trim()) {
       return socket.emit('error', { message_ru: 'Укажите имя администратора', code: 'MISSING_NAME' });
     }
@@ -207,6 +233,49 @@ function registerHandlers(io, socket) {
       }
     }
     io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
+  });
+
+  // ── CUSTOM TASKS (Teacher tools) ────────────────────────
+  socket.on('admin_get_custom_tasks', () => {
+    if (!requireAdmin()) return;
+    socket.emit('custom_tasks_list', { tasks: TASKS.filter(t => t.isCustom) });
+  });
+
+  socket.on('admin_add_task', (data = {}) => {
+    if (!requireAdmin()) return;
+    const { level, type, category, question_ru, correct_answer, options, hints, code_snippet, lore_description_ru } = data;
+
+    if (!level || ![1,2,3,4,5].includes(Number(level)))
+      return socket.emit('error', { message_ru: 'Укажите уровень (1-5)', code: 'TASK_INVALID' });
+    if (!['text_phrase','multiple_choice','code_repair'].includes(type))
+      return socket.emit('error', { message_ru: 'Укажите корректный тип задачи', code: 'TASK_INVALID' });
+    if (!['logic_crypto','cs_theory','programming'].includes(category))
+      return socket.emit('error', { message_ru: 'Укажите категорию', code: 'TASK_INVALID' });
+    if (!question_ru?.trim())
+      return socket.emit('error', { message_ru: 'Вопрос не может быть пустым', code: 'TASK_INVALID' });
+    if (!correct_answer?.trim())
+      return socket.emit('error', { message_ru: 'Ответ не может быть пустым', code: 'TASK_INVALID' });
+    if (type === 'multiple_choice' && (!Array.isArray(options) || options.length < 2))
+      return socket.emit('error', { message_ru: 'Укажите минимум 2 варианта ответа', code: 'TASK_INVALID' });
+
+    const task = addCustomTask({
+      level: Number(level), type, category,
+      question_ru: question_ru.trim(),
+      correct_answer: correct_answer.trim(),
+      options, hints, code_snippet, lore_description_ru,
+    });
+
+    log(`Добавлена пользовательская задача #${task.id} (L${task.level} ${task.type})`);
+    socket.emit('custom_task_saved', { task });
+    socket.emit('custom_tasks_list', { tasks: TASKS.filter(t => t.isCustom) });
+  });
+
+  socket.on('admin_delete_task', ({ id } = {}) => {
+    if (!requireAdmin()) return;
+    const ok = removeCustomTask(id);
+    if (!ok) return socket.emit('error', { message_ru: 'Задача не найдена или не является пользовательской', code: 'TASK_NOT_FOUND' });
+    log(`Удалена пользовательская задача #${id}`);
+    socket.emit('custom_tasks_list', { tasks: TASKS.filter(t => t.isCustom) });
   });
 
   // ── DISCONNECT ───────────────────────────────────────────

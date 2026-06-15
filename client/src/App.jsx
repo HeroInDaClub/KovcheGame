@@ -28,6 +28,8 @@ export default function App() {
   const [hintsRevealed, setHintsRevealed] = useState(0);
   const [revealedHints, setRevealedHints] = useState({});  // { [idx]: text }
   const [notification, setNotif]   = useState('');
+  const [customTasks,  setCustomTasks] = useState([]);
+  const [lastSaved,    setLastSaved]   = useState(null);
 
   const notify = useCallback((msg, duration = 4000) => {
     setNotif(msg);
@@ -106,6 +108,24 @@ export default function App() {
       notify(`⚠️ ${message_ru}`, 5000);
     });
 
+    socket.on('custom_tasks_list', ({ tasks }) => {
+      setCustomTasks(tasks);
+    });
+
+    socket.on('custom_task_saved', ({ task }) => {
+      setLastSaved(task.id);
+      notify(`✓ Задача #${task.id} (L${task.level}) сохранена`, 3000);
+    });
+
+    socket.on('admin_auth_result', ({ ok, message_ru }) => {
+      if (ok) {
+        setIsAdmin(true);
+        setView('admin');
+      } else {
+        notify(`⚠️ ${message_ru || 'Неверный пароль'}`, 4000);
+      }
+    });
+
     return () => {
       disconnect();
       socket.removeAllListeners();
@@ -172,6 +192,10 @@ export default function App() {
       <AdminPanel
         notification={notification}
         roomId={roomId}
+        customTasks={customTasks}
+        lastSaved={lastSaved}
+        onAddTask={(data) => socket.emit('admin_add_task', data)}
+        onDeleteTask={(id) => socket.emit('admin_delete_task', { id })}
         onCreateRoom={({ adminName, duration, maxTeams, totalTasksCount, difficultyPreset }) => {
           setPlayerName(adminName);
           setIsAdmin(true);
@@ -191,7 +215,7 @@ export default function App() {
   return (
     <EntryScreen
       notification={notification}
-      onAdmin={() => setView('admin')}
+      onAdmin={({ password }) => socket.emit('admin_auth', { password })}
       onPlayer={({ name, code }) => {
         setPlayerName(name);
         setIsAdmin(false);
@@ -203,9 +227,10 @@ export default function App() {
 
 // ── Entry Screen ─────────────────────────────────────────
 function EntryScreen({ onAdmin, onPlayer, notification }) {
-  const [mode,  setMode]  = useState('');       // 'admin' | 'player'
-  const [name,  setName]  = useState('');
-  const [code,  setCode]  = useState('');
+  const [mode,     setMode]     = useState('');    // 'admin' | 'player'
+  const [name,     setName]     = useState('');
+  const [code,     setCode]     = useState('');
+  const [password, setPassword] = useState('');
 
   return (
     <div className="min-h-screen bg-cyber-dark cyber-grid flex flex-col items-center justify-center p-4 font-mono">
@@ -249,17 +274,20 @@ function EntryScreen({ onAdmin, onPlayer, notification }) {
         <div className="flex flex-col gap-4 w-full max-w-sm">
           <div className="text-cyber-blue text-xs text-center mb-2 tracking-widest">ВОЙТИ КАК УЧИТЕЛЬ</div>
           <input
+            type="password"
             className="bg-cyber-panel border border-cyber-border text-cyber-text px-4 py-3 focus:outline-none focus:border-cyber-purple w-full"
-            placeholder="Ваше имя"
-            value={name}
-            onChange={e => setName(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && name.trim() && onAdmin()}
+            placeholder="Пароль учителя"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && password.trim() && onAdmin({ password })}
+            autoFocus
           />
           <button
-            onClick={() => name.trim() && onAdmin()}
-            className="px-6 py-3 bg-cyber-purple text-black font-bold tracking-widest text-sm uppercase hover:opacity-90 transition"
+            onClick={() => password.trim() && onAdmin({ password })}
+            disabled={!password.trim()}
+            className="px-6 py-3 bg-cyber-purple text-black font-bold tracking-widest text-sm uppercase hover:opacity-90 transition disabled:opacity-30 disabled:cursor-not-allowed"
           >
-            Создать комнату
+            Войти
           </button>
           <button onClick={() => setMode('')} className="text-cyber-muted text-xs hover:text-cyber-text text-center">← Назад</button>
         </div>
