@@ -9,10 +9,18 @@ const { TASKS, addCustomTask, removeCustomTask } = require('./taskDatabase');
 // иначе используется значение по умолчанию (ОБЯЗАТЕЛЬНО смените на проде!).
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'aegis-teacher';
 
+// Зарегистрированные учителя: Map<username(lowercase), password>.
+// Хранятся в памяти сервера (БД нет), сбрасываются при перезапуске.
+const teachers = new Map();
+
+const SUPERUSER = 'admin'; // резервный логин, работает под ADMIN_PASSWORD
+const normUser = (u) => (u || '').toString().trim().toLowerCase();
+
 function registerHandlers(io, socket) {
   const log = (msg) => console.log(`[${new Date().toISOString()}] [${socket.id.slice(0, 8)}] ${msg}`);
 
-  // Проверка прав учителя — socket.data.isAdmin ставится только после admin_auth
+  // Проверка прав учителя — socket.data.isAdmin ставится только после успешного
+  // admin_auth (т.е. после валидации по коллекции teachers / суперпользователю)
   const requireAdmin = () => {
     if (!socket.data.isAdmin) {
       socket.emit('error', { message_ru: 'Требуется авторизация учителя', code: 'NOT_AUTHORIZED' });
@@ -21,15 +29,45 @@ function registerHandlers(io, socket) {
     return true;
   };
 
-  // ── ADMIN AUTH (пароль-гейт панели учителя) ──────────────
-  socket.on('admin_auth', ({ password } = {}) => {
-    if (password !== ADMIN_PASSWORD) {
-      log('Неудачная попытка входа в панель учителя');
-      return socket.emit('admin_auth_result', { ok: false, message_ru: 'Неверный пароль учителя' });
+  // ── ADMIN AUTH (вход учителя по логину/паролю) ───────────
+  // Проверка идёт по коллекции зарегистрированных учителей (teachers)
+  // + резервному суперпользователю (SUPERUSER / ADMIN_PASSWORD).
+  socket.on('admin_auth', ({ username, password } = {}) => {
+    const key = normUser(username);
+    if (!key || !password) {
+      return socket.emit('admin_auth_result', { ok: false, message_ru: 'Укажите логин и пароль' });
     }
-    socket.data.isAdmin = true;
-    log('Учитель авторизован');
+
+    const isSuperuser = key === SUPERUSER && password === ADMIN_PASSWORD;
+    const isTeacher   = teachers.has(key) && teachers.get(key) === password;
+
+    if (!isSuperuser && !isTeacher) {
+      log(`Неудачный вход учителя: "${key}"`);
+      return socket.emit('admin_auth_result', { ok: false, message_ru: 'Неверный логин или пароль' });
+    }
+
+    socket.data.isAdmin  = true;
+    socket.data.username = key;
+    log(`Учитель авторизован: "${key}"`);
     socket.emit('admin_auth_result', { ok: true });
+  });
+
+  // ── TEACHER REGISTER (динамическая регистрация учителей) ──
+  socket.on('teacher_register', ({ username, password } = {}) => {
+    const key = normUser(username);
+    if (!key || !password?.trim()) {
+      return socket.emit('teacher_register_result', { ok: false, message_ru: 'Укажите логин и пароль' });
+    }
+    if (key.length < 3) {
+      return socket.emit('teacher_register_result', { ok: false, message_ru: 'Логин должен быть не короче 3 символов' });
+    }
+    if (key === SUPERUSER || teachers.has(key)) {
+      return socket.emit('teacher_register_result', { ok: false, message_ru: 'Пользователь с таким логином уже существует' });
+    }
+
+    teachers.set(key, password);
+    log(`Зарегистрирован учитель: "${key}" (всего: ${teachers.size})`);
+    socket.emit('teacher_register_result', { ok: true, message_ru: 'Регистрация успешна, теперь вы можете войти' });
   });
 
   // ── CREATE ROOM (Admin/Teacher) ──────────────────────────

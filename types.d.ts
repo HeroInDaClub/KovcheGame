@@ -123,3 +123,18 @@ export interface HintRevealedPayload {
   penaltyPerHint: number;
 }
 export interface ErrorPayload        { message_ru: string; code?: string; }
+
+// ── Teacher Auth ───────────────────────────────────────────
+// Учителя регистрируются в рантайме и хранятся в памяти сервера
+// (Map<username, password>); список сбрасывается при перезапуске.
+// Резервный суперпользователь: логин 'admin' + ADMIN_PASSWORD.
+export interface Teacher {
+  username: string;
+  password: string;   // plain-text — учебный/внутренний проект, БД нет
+}
+
+export interface AdminAuthPayload       { username: string; password: string; }
+export interface TeacherRegisterPayload { username: string; password: string; }
+
+export interface AdminAuthResultPayload       { ok: boolean; message_ru?: string; }
+export interface TeacherRegisterResultPayload { ok: boolean; message_ru: string; }

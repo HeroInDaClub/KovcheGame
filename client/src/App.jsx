@@ -122,8 +122,12 @@ export default function App() {
         setIsAdmin(true);
         setView('admin');
       } else {
-        notify(`⚠️ ${message_ru || 'Неверный пароль'}`, 4000);
+        notify(`⚠️ ${message_ru || 'Неверный логин или пароль'}`, 4000);
       }
+    });
+
+    socket.on('teacher_register_result', ({ ok, message_ru }) => {
+      notify(`${ok ? '✅' : '⚠️'} ${message_ru}`, 4500);
     });
 
     return () => {
@@ -215,7 +219,8 @@ export default function App() {
   return (
     <EntryScreen
       notification={notification}
-      onAdmin={({ password }) => socket.emit('admin_auth', { password })}
+      onAdmin={({ username, password }) => socket.emit('admin_auth', { username, password })}
+      onRegister={({ username, password }) => socket.emit('teacher_register', { username, password })}
       onPlayer={({ name, code }) => {
         setPlayerName(name);
         setIsAdmin(false);
@@ -226,11 +231,20 @@ export default function App() {
 }
 
 // ── Entry Screen ─────────────────────────────────────────
-function EntryScreen({ onAdmin, onPlayer, notification }) {
-  const [mode,     setMode]     = useState('');    // 'admin' | 'player'
+function EntryScreen({ onAdmin, onRegister, onPlayer, notification }) {
+  const [mode,     setMode]     = useState('');        // 'admin' | 'player'
+  const [authTab,  setAuthTab]  = useState('login');   // 'login' | 'register'
   const [name,     setName]     = useState('');
   const [code,     setCode]     = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+
+  const submitAuth = () => {
+    const u = username.trim();
+    if (!u || !password.trim()) return;
+    if (authTab === 'login') onAdmin({ username: u, password });
+    else                     onRegister({ username: u, password });
+  };
 
   return (
     <div className="min-h-screen bg-cyber-dark cyber-grid flex flex-col items-center justify-center p-4 font-mono">
@@ -272,22 +286,48 @@ function EntryScreen({ onAdmin, onPlayer, notification }) {
 
       {mode === 'admin' && (
         <div className="flex flex-col gap-4 w-full max-w-sm">
-          <div className="text-cyber-blue text-xs text-center mb-2 tracking-widest">ВОЙТИ КАК УЧИТЕЛЬ</div>
+          <div className="text-cyber-purple text-xs text-center mb-1 tracking-widest">ПАНЕЛЬ УЧИТЕЛЯ</div>
+
+          {/* Переключатель Вход / Регистрация */}
+          <div className="flex border border-cyber-border">
+            <button
+              onClick={() => setAuthTab('login')}
+              className={`flex-1 py-2 text-xs font-bold tracking-widest transition
+                ${authTab === 'login' ? 'bg-cyber-purple text-black' : 'text-cyber-muted hover:text-cyber-purple'}`}
+            >
+              ВХОД
+            </button>
+            <button
+              onClick={() => setAuthTab('register')}
+              className={`flex-1 py-2 text-xs font-bold tracking-widest transition
+                ${authTab === 'register' ? 'bg-cyber-purple text-black' : 'text-cyber-muted hover:text-cyber-purple'}`}
+            >
+              РЕГИСТРАЦИЯ
+            </button>
+          </div>
+
+          <input
+            className="bg-cyber-panel border border-cyber-border text-cyber-text px-4 py-3 focus:outline-none focus:border-cyber-purple w-full"
+            placeholder="Логин"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && submitAuth()}
+            autoFocus
+          />
           <input
             type="password"
             className="bg-cyber-panel border border-cyber-border text-cyber-text px-4 py-3 focus:outline-none focus:border-cyber-purple w-full"
-            placeholder="Пароль учителя"
+            placeholder="Пароль"
             value={password}
             onChange={e => setPassword(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && password.trim() && onAdmin({ password })}
-            autoFocus
+            onKeyDown={e => e.key === 'Enter' && submitAuth()}
           />
           <button
-            onClick={() => password.trim() && onAdmin({ password })}
-            disabled={!password.trim()}
+            onClick={submitAuth}
+            disabled={!username.trim() || !password.trim()}
             className="px-6 py-3 bg-cyber-purple text-black font-bold tracking-widest text-sm uppercase hover:opacity-90 transition disabled:opacity-30 disabled:cursor-not-allowed"
           >
-            Войти
+            {authTab === 'login' ? 'Войти' : 'Зарегистрироваться'}
           </button>
           <button onClick={() => setMode('')} className="text-cyber-muted text-xs hover:text-cyber-text text-center">← Назад</button>
         </div>
