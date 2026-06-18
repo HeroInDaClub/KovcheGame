@@ -20,8 +20,9 @@ export default function App() {
   const [roomId,     setRoomId]     = useState('');
   const [playerName, setPlayerName] = useState('');
   const [isAdmin,    setIsAdmin]    = useState(false);
-  const [timer,      setTimer]      = useState(null);
-  const [taskResult, setTaskResult] = useState(null);
+  const [timer,        setTimer]        = useState(null);
+  const [endTimestamp, setEndTimestamp] = useState(null);
+  const [taskResult,   setTaskResult]   = useState(null);
   const [gameOver,   setGameOver]   = useState(null);
   const [notification, setNotif]   = useState('');
   const [customTasks,  setCustomTasks] = useState([]);
@@ -50,17 +51,15 @@ export default function App() {
 
     socket.on('room_state', (state) => {
       setRoomState(state);
+      setEndTimestamp(state.endTimestamp ?? null);   // null в лобби, метка в игре
       if (state.phase === 'playing' && view !== 'playing') setView('playing');
       if (state.phase === 'ended'   && view !== 'ended')   setView('ended');
     });
 
-    socket.on('game_started', ({ message_ru }) => {
+    socket.on('game_started', ({ message_ru, endTimestamp: end }) => {
       notify(message_ru, 5000);
+      if (end) setEndTimestamp(end);
       setView('playing');
-    });
-
-    socket.on('timer_tick', ({ remaining }) => {
-      setTimer(remaining);
     });
 
     // Модалка задачи открывается/закрывается по activeTaskId в room_state.
@@ -122,10 +121,18 @@ export default function App() {
     };
   }, []); // eslint-disable-line
 
-  // Keep timer in sync with roomState when re-joining
+  // Точный локальный таймер: считаем remaining от серверного endTimestamp.
+  // Пока игра не началась (endTimestamp == null) — показываем полную длительность.
   useEffect(() => {
-    if (roomState && timer === null) setTimer(roomState.globalTimer);
-  }, [roomState]);
+    if (!endTimestamp) {
+      setTimer(roomState ? roomState.gameDuration : null);
+      return;
+    }
+    const tick = () => setTimer(Math.max(0, Math.floor((endTimestamp - Date.now()) / 1000)));
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, [endTimestamp, roomState?.gameDuration]);
 
   if (view === 'ended' && gameOver) {
     return <GameOver gameOver={gameOver} roomState={roomState} />;
@@ -136,7 +143,7 @@ export default function App() {
       return (
         <TeacherDashboard
           roomState={roomState}
-          timer={timer ?? roomState.globalTimer}
+          timer={timer ?? roomState.gameDuration}
           isAdmin={isAdmin}
           notification={notification}
           onStartGame={() => socket.emit('start_game')}
@@ -146,7 +153,7 @@ export default function App() {
     return (
       <Dashboard
         roomState={roomState}
-        timer={timer ?? roomState.globalTimer}
+        timer={timer ?? roomState.gameDuration}
         taskResult={taskResult}
         playerName={playerName}
         isAdmin={isAdmin}
@@ -168,6 +175,9 @@ export default function App() {
         isAdmin={isAdmin}
         notification={notification}
         onSelectTeam={(teamName) => socket.emit('select_team', { teamName })}
+        onCreateTeam={(teamName) => socket.emit('create_team', { teamName })}
+        onKickMember={(targetId) => socket.emit('kick_member', { targetId })}
+        onDeleteTeam={(teamName) => socket.emit('delete_team', { teamName })}
         onStartGame={()          => socket.emit('start_game')}
       />
     );

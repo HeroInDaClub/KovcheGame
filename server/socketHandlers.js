@@ -29,6 +29,9 @@ function registerHandlers(io, socket) {
     return true;
   };
 
+  // Отметка активности комнаты — питает Room Reaper (см. gameState reaper).
+  const touch = (room) => { if (room) room.lastActivityAt = Date.now(); };
+
   // ── ADMIN AUTH (вход учителя по логину/паролю) ───────────
   // Проверка идёт по коллекции зарегистрированных учителей (teachers)
   // + резервному суперпользователю (SUPERUSER / ADMIN_PASSWORD).
@@ -89,6 +92,7 @@ function registerHandlers(io, socket) {
       difficultyPreset,
     });
     socket.join(room.roomId);
+    touch(room);
     log(`Создана комната ${room.roomId} администратором "${adminName}"`);
     socket.emit('room_created', { roomId: room.roomId });
     socket.emit('room_state', gs.getPublicRoomState(room));
@@ -106,25 +110,75 @@ function registerHandlers(io, socket) {
     socket.join(roomId.toUpperCase().trim());
     socket.data.playerName = playerName.trim();
     socket.data.roomId = roomId.toUpperCase().trim();
+    touch(result.room);
     log(`"${playerName}" вошёл в комнату ${roomId}`);
     socket.emit('joined_room', { roomId: roomId.toUpperCase().trim() });
     io.to(roomId.toUpperCase().trim()).emit('room_state', gs.getPublicRoomState(result.room));
   });
 
-  // ── SELECT TEAM ──────────────────────────────────────────
+  // ── JOIN EXISTING TEAM (lobby) ───────────────────────────
   socket.on('select_team', ({ teamName } = {}) => {
     const roomId = socket.data.roomId;
     if (!roomId) return socket.emit('error', { message_ru: 'Вы не в комнате', code: 'NOT_IN_ROOM' });
-
     const room = gs.getRoom(roomId);
     if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
+    if (room.phase !== 'lobby') return socket.emit('error', { message_ru: 'Сменить команду можно только в лобби', code: 'NOT_LOBBY' });
 
-    const playerName = socket.data.playerName;
-    const result = gs.selectTeam(room, socket.id, playerName, teamName);
-    if (result.error) {
-      return socket.emit('error', { message_ru: result.error, code: 'TEAM_ERROR' });
+    const result = gs.selectTeam(room, socket.id, socket.data.playerName, teamName);
+    if (result.error) return socket.emit('error', { message_ru: result.error, code: 'TEAM_ERROR' });
+
+    touch(room);
+    log(`"${socket.data.playerName}" вошёл в команду "${teamName}" (капитан: ${result.player.isCaptain})`);
+    io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
+  });
+
+  // ── CREATE CUSTOM TEAM (lobby) ───────────────────────────
+  socket.on('create_team', ({ teamName } = {}) => {
+    const roomId = socket.data.roomId;
+    if (!roomId) return socket.emit('error', { message_ru: 'Вы не в комнате', code: 'NOT_IN_ROOM' });
+    const room = gs.getRoom(roomId);
+    if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
+    if (room.phase !== 'lobby') return socket.emit('error', { message_ru: 'Создавать команды можно только в лобби', code: 'NOT_LOBBY' });
+
+    const result = gs.createTeam(room, socket.id, socket.data.playerName, teamName);
+    if (result.error) return socket.emit('error', { message_ru: result.error, code: 'TEAM_ERROR' });
+
+    touch(room);
+    log(`"${socket.data.playerName}" создал команду "${result.team.teamName}"`);
+    io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
+  });
+
+  // ── KICK MEMBER (captain only, lobby) ────────────────────
+  socket.on('kick_member', ({ targetId } = {}) => {
+    const roomId = socket.data.roomId;
+    const room = gs.getRoom(roomId);
+    if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
+    if (room.phase !== 'lobby') return socket.emit('error', { message_ru: 'Исключать игроков можно только в лобби', code: 'NOT_LOBBY' });
+
+    const result = gs.kickMember(room, socket.id, targetId);
+    if (result.error) return socket.emit('error', { message_ru: result.error, code: 'KICK_ERROR' });
+
+    touch(room);
+    log(`Капитан исключил "${result.kickedName}" из "${result.teamName}"`);
+    io.to(result.kickedId).emit('error', { message_ru: `Вас исключили из команды «${result.teamName}»`, code: 'KICKED' });
+    io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
+  });
+
+  // ── DELETE TEAM (teacher only, lobby) ────────────────────
+  socket.on('delete_team', ({ teamName } = {}) => {
+    const roomId = socket.data.roomId;
+    const room = gs.getRoom(roomId);
+    if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
+    if (room.phase !== 'lobby') return socket.emit('error', { message_ru: 'Удалять команды можно только в лобби', code: 'NOT_LOBBY' });
+
+    const result = gs.deleteTeam(room, socket.id, teamName);
+    if (result.error) return socket.emit('error', { message_ru: result.error, code: 'DELETE_ERROR' });
+
+    touch(room);
+    log(`Учитель удалил команду "${result.teamName}"`);
+    for (const id of result.memberIds) {
+      io.to(id).emit('error', { message_ru: `Команда «${result.teamName}» удалена учителем`, code: 'TEAM_DELETED' });
     }
-    log(`"${playerName}" выбрал команду "${teamName}" (капитан: ${result.player.isCaptain})`);
     io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
   });
 
@@ -137,24 +191,28 @@ function registerHandlers(io, socket) {
     if (room.phase !== 'lobby') return socket.emit('error', { message_ru: 'Игра уже запущена', code: 'ALREADY_STARTED' });
 
     room.phase = 'playing';
-    log(`Игра ${roomId} НАЧАТА`);
-    io.to(roomId).emit('game_started', { message_ru: '⚡ Aegis-X активирован. Начните взлом!', timestamp: Date.now() });
+    // Точный таймер на таймстампе: без ежесекундного декремента/рассылки.
+    room.endTimestamp = Date.now() + room.gameDuration * 1000;
+    touch(room);
+    log(`Игра ${roomId} НАЧАТА (до ${new Date(room.endTimestamp).toISOString()})`);
+    io.to(roomId).emit('game_started', {
+      message_ru:   '⚡ Aegis-X активирован. Начните взлом!',
+      endTimestamp: room.endTimestamp,
+    });
     io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
 
-    // Global countdown timer — ticks every second
+    // Серверный интервал только СВЕРЯЕТ время для триггера завершения.
     room.timerInterval = setInterval(() => {
-      room.globalTimer -= 1;
-      io.to(roomId).emit('timer_tick', { remaining: room.globalTimer });
+      if (Date.now() < room.endTimestamp) return;
 
-      if (room.globalTimer <= 0) {
-        clearInterval(room.timerInterval);
-        room.timerInterval = null;
-        room.phase = 'ended';
-        const scores = buildFinalScores(room);
-        log(`Игра ${roomId} ЗАВЕРШЕНА — время вышло`);
-        io.to(roomId).emit('game_ended', { reason: 'timeout', message_ru: '⏰ Время вышло! Игра завершена.', scores });
-        io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
-      }
+      clearInterval(room.timerInterval);
+      room.timerInterval = null;
+      room.phase = 'ended';
+      touch(room);
+      const scores = buildFinalScores(room);
+      log(`Игра ${roomId} ЗАВЕРШЕНА — время вышло`);
+      io.to(roomId).emit('game_ended', { reason: 'timeout', message_ru: '⏰ Время вышло! Игра завершена.', scores });
+      io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
     }, 1000);
   });
 
@@ -168,6 +226,7 @@ function registerHandlers(io, socket) {
     const result = gs.pickTask(room, socket.id, taskId);
     if (result.error) return socket.emit('error', { message_ru: result.error, code: 'PICK_ERROR' });
 
+    touch(room);
     const captainName = socket.data.playerName;
     log(`Капитан "${captainName}" открыл задачу #${taskId} для команды "${result.team.teamName}"`);
 
@@ -196,6 +255,7 @@ function registerHandlers(io, socket) {
     const result = gs.submitAnswer(room, socket.id, answer);
     if (result.error) return socket.emit('error', { message_ru: result.error, code: 'ANSWER_ERROR' });
 
+    touch(room);
     const playerTeam = gs.getPlayerTeam(room, socket.id);
     log(`Команда "${playerTeam?.team.teamName}" ответила на задачу — ${result.correct ? 'ВЕРНО' : 'НЕВЕРНО'}`);
 
@@ -242,6 +302,7 @@ function registerHandlers(io, socket) {
     const result = gs.abandonTask(room, socket.id);
     if (result.error) return socket.emit('error', { message_ru: result.error, code: 'ABANDON_ERROR' });
 
+    touch(room);
     const playerTeam = gs.getPlayerTeam(room, socket.id);
     log(`Команда "${result.teamName}" покинула задачу #${result.taskId}`);
 
@@ -303,6 +364,7 @@ function registerHandlers(io, socket) {
   socket.on('disconnect', () => {
     const room = gs.removePlayer(socket.id);
     if (room) {
+      touch(room);
       log(`Игрок "${socket.data.playerName}" отключился от ${room.roomId}`);
       io.to(room.roomId).emit('room_state', gs.getPublicRoomState(room));
     }

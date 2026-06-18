@@ -161,26 +161,18 @@ function createRoom(adminId, adminName, {
   let roomId;
   do { roomId = generateRoomId(); } while (rooms.has(roomId));
 
+  // Команды больше не пресетятся — игроки создают их в лобби с кастомными
+  // названиями (см. createTeam). maxTeams остаётся как верхний лимит.
   const teams = {};
-  for (const cfg of ALL_TEAM_CONFIGS.slice(0, maxTeams)) {
-    teams[cfg.name] = {
-      teamName:     cfg.name,
-      color:        cfg.color,
-      score:        0,
-      captainId:    null,
-      members:      [],
-      activeTaskId: null,
-      taskStatuses: {},
-    };
-  }
 
+  const now = Date.now();
   const room = {
     roomId,
     adminId,
     adminName,
     phase:           'lobby',
-    globalTimer:     gameDurationMinutes * 60,
-    gameDuration:    gameDurationMinutes * 60,
+    gameDuration:    gameDurationMinutes * 60,   // секунды
+    endTimestamp:    null,                         // ставится при start_game
     timerInterval:   null,
     maxTeams,
     totalTasksCount,
@@ -188,7 +180,8 @@ function createRoom(adminId, adminName, {
     teams,
     taskPool:        selectTaskPool(totalTasksCount, difficultyPreset),
     mapSectors:      MAP_SECTORS.map(s => ({ ...s })),
-    createdAt:       new Date().toISOString(),
+    createdAt:       new Date(now).toISOString(),
+    lastActivityAt:  now,
   };
 
   rooms.set(roomId, room);
@@ -216,44 +209,110 @@ function joinRoom(roomId, socketId, playerName) {
   return { room };
 }
 
+// Снять игрока с его текущей команды (с передачей капитанства, если ушёл капитан).
+function detachPlayer(room, socketId) {
+  for (const t of Object.values(room.teams)) {
+    const idx = t.members.findIndex(m => m.id === socketId);
+    if (idx === -1) continue;
+    t.members.splice(idx, 1);
+    if (t.captainId === socketId) {
+      t.captainId = t.members.length > 0 ? t.members[0].id : null;
+      if (t.members.length > 0) t.members[0].isCaptain = true;
+    }
+  }
+}
+
+// Удалить пустые команды (только в лобби — в игре пустая команда хранит счёт/захваты).
+function pruneEmptyTeams(room) {
+  if (room.phase !== 'lobby') return;
+  for (const name of Object.keys(room.teams)) {
+    if (room.teams[name].members.length === 0) delete room.teams[name];
+  }
+}
+
+// Подобрать первый свободный неоновый цвет из пресет-палитры.
+function pickTeamColor(room) {
+  const used = new Set(Object.values(room.teams).map(t => t.color));
+  for (const cfg of ALL_TEAM_CONFIGS) {
+    if (!used.has(cfg.color)) return { color: cfg.color, glow: cfg.glow };
+  }
+  const hue = (Object.keys(room.teams).length * 47) % 360; // fallback за пределами 25
+  return { color: `hsl(${hue} 90% 60%)`, glow: `hsl(${hue} 90% 60% / 0.27)` };
+}
+
+// Создать команду с кастомным названием; создатель становится капитаном.
+function createTeam(room, socketId, playerName, rawName) {
+  const teamName = (rawName || '').trim();
+  if (!teamName) return { error: 'Введите название команды' };
+  if (teamName.length > 24) return { error: 'Название слишком длинное (макс. 24 символа)' };
+  if (Object.keys(room.teams).some(n => n.toLowerCase() === teamName.toLowerCase())) {
+    return { error: 'Команда с таким названием уже существует' };
+  }
+  if (Object.keys(room.teams).length >= room.maxTeams) {
+    return { error: `Достигнут лимит команд (${room.maxTeams})` };
+  }
+
+  detachPlayer(room, socketId);
+
+  const { color, glow } = pickTeamColor(room);
+  const player = { id: socketId, name: playerName, teamName, isCaptain: true };
+  room.teams[teamName] = {
+    teamName, color, glow, score: 0,
+    captainId: socketId, members: [player],
+    activeTaskId: null, taskStatuses: {},
+  };
+  pruneEmptyTeams(room);
+  return { team: room.teams[teamName], player };
+}
+
+// Войти в существующую команду; первый вошедший — капитан.
 function selectTeam(room, socketId, playerName, teamName) {
   const team = room.teams[teamName];
   if (!team) return { error: 'Команда не найдена' };
 
-  // Remove player from any previous team
-  for (const t of Object.values(room.teams)) {
-    const idx = t.members.findIndex(m => m.id === socketId);
-    if (idx !== -1) {
-      t.members.splice(idx, 1);
-      if (t.captainId === socketId) {
-        t.captainId = t.members.length > 0 ? t.members[0].id : null;
-        if (t.members.length > 0) t.members[0].isCaptain = true;
-      }
-    }
-  }
+  detachPlayer(room, socketId);
 
   const isCaptain = team.members.length === 0;
   const player = { id: socketId, name: playerName, teamName, isCaptain };
   team.members.push(player);
   if (isCaptain) team.captainId = socketId;
 
+  pruneEmptyTeams(room);
   return { player, team };
+}
+
+// Капитан исключает участника своей команды → тот становится нераспределённым.
+function kickMember(room, captainSocketId, targetId) {
+  const info = getPlayerTeam(room, captainSocketId);
+  if (!info) return { error: 'Вы не состоите в команде' };
+  const { team } = info;
+  if (team.captainId !== captainSocketId) return { error: 'Исключать участников может только капитан' };
+  if (targetId === captainSocketId) return { error: 'Нельзя исключить самого себя' };
+
+  const idx = team.members.findIndex(m => m.id === targetId);
+  if (idx === -1) return { error: 'Игрок не найден в вашей команде' };
+
+  const [kicked] = team.members.splice(idx, 1);
+  return { kickedId: targetId, kickedName: kicked.name, teamName: team.teamName };
+}
+
+// Учитель полностью удаляет команду → все её участники сбрасываются в лобби.
+function deleteTeam(room, requesterId, teamName) {
+  if (room.adminId !== requesterId) return { error: 'Удалять команды может только учитель' };
+  const team = room.teams[teamName];
+  if (!team) return { error: 'Команда не найдена' };
+
+  const memberIds = team.members.map(m => m.id);
+  delete room.teams[teamName];
+  return { teamName, memberIds };
 }
 
 function removePlayer(socketId) {
   const room = getRoomBySocket(socketId);
   if (!room) return null;
 
-  for (const team of Object.values(room.teams)) {
-    const idx = team.members.findIndex(m => m.id === socketId);
-    if (idx !== -1) {
-      team.members.splice(idx, 1);
-      if (team.captainId === socketId) {
-        team.captainId = team.members.length > 0 ? team.members[0].id : null;
-        if (team.members.length > 0) team.members[0].isCaptain = true;
-      }
-    }
-  }
+  detachPlayer(room, socketId);
+  pruneEmptyTeams(room);
   return room;
 }
 
@@ -551,6 +610,43 @@ function deleteRoom(roomId) {
   rooms.delete(roomId);
 }
 
+function countMembers(room) {
+  return Object.values(room.teams).reduce((s, t) => s + t.members.length, 0);
+}
+
+// ── Room Reaper ──────────────────────────────────────────
+// Фоновое сканирование Map комнат: освобождает память от мёртвых сессий.
+const REAPER_INTERVAL_MS = 2 * 60 * 1000;  // раз в 2 минуты
+const LOBBY_IDLE_TTL     = 30 * 60 * 1000; // лобби без активности
+const ENDED_TTL          = 10 * 60 * 1000; // завершённая игра
+const EMPTY_TTL          = 5  * 60 * 1000; // пусто + админ оффлайн
+
+// Один проход reaper'а (вынесен для тестируемости).
+function reapRooms(io, now = Date.now()) {
+  const reaped = [];
+  for (const [roomId, room] of rooms) {
+    const idle        = now - (room.lastActivityAt || now);
+    const members     = countMembers(room);
+    const adminOnline = io.sockets.sockets.has(room.adminId);
+
+    let reason = null;
+    if (room.phase === 'lobby' && idle > LOBBY_IDLE_TTL)         reason = 'lobby-idle';
+    else if (room.phase === 'ended' && idle > ENDED_TTL)         reason = 'ended-expired';
+    else if (members === 0 && !adminOnline && idle > EMPTY_TTL)  reason = 'empty-orphaned';
+
+    if (reason) {
+      deleteRoom(roomId);
+      reaped.push({ roomId, reason });
+      console.log(`[REAPER] Комната ${roomId} удалена (${reason}), осталось: ${rooms.size}`);
+    }
+  }
+  return reaped;
+}
+
+function startRoomReaper(io) {
+  return setInterval(() => reapRooms(io), REAPER_INTERVAL_MS);
+}
+
 module.exports = {
   rooms,
   createRoom,
@@ -558,6 +654,9 @@ module.exports = {
   getRoomBySocket,
   joinRoom,
   selectTeam,
+  createTeam,
+  kickMember,
+  deleteTeam,
   removePlayer,
   getPlayerTeam,
   pickTask,
@@ -565,6 +664,8 @@ module.exports = {
   abandonTask,
   getPublicRoomState,
   deleteRoom,
+  startRoomReaper,
+  reapRooms,
   // Exposed for tests + future LLM/teacher-review pipelines
   normalize,
   checkAnswer,

@@ -10,6 +10,7 @@ const cors      = require('cors');
 const path      = require('path');
 
 const { registerHandlers } = require('./socketHandlers');
+const { startRoomReaper }  = require('./gameState');
 
 const PORT = process.env.PORT || 3001;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
@@ -51,6 +52,8 @@ server.listen(PORT, () => {
   console.log(`║   Aegis-X: Cyber-Siege — СЕРВЕР     ║`);
   console.log(`║   Порт: ${PORT}                         ║`);
   console.log(`╚══════════════════════════════════════╝\n`);
+  startRoomReaper(io);   // фоновая очистка мёртвых комнат
+  console.log('[REAPER] Room Reaper запущен');
 });
 
 process.on('unhandledRejection', (err) => console.error('[ОШИБКА]', err));
