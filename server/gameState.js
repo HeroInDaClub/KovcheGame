@@ -2,8 +2,16 @@
 // Aegis-X: Cyber-Siege — In-Memory Game State Manager
 // ============================================================
 
-const vm = require('vm');
+const path = require('path');
+const { Worker } = require('worker_threads');
 const { TASKS } = require('./taskDatabase');
+
+const WORKER_PATH     = path.join(__dirname, 'codeRunner.worker.js');
+const CODE_TIMEOUT_MS = 1000;
+
+// Per-team замок на время асинхронной проверки ответа: предотвращает
+// гонку (TOCTOU) при параллельных submit_answer от одной команды.
+const evaluating = new WeakSet();
 
 // До 25 команд — в кибер/греческой тематике, каждая с уникальным неон-цветом
 const ALL_TEAM_CONFIGS = [
@@ -398,46 +406,60 @@ function checkInteractiveMatch(answer, task) {
 // full_code: исходник игрока выполняется в изолированном vm-контексте с таймаутом
 // и прогоняется против task.tests ([{ args, expected }]). entry — имя функции.
 // ⚠️ vm — не криптостойкая песочница; для учебного прототипа (доверенный класс) ОК.
+// Выполнение в ИЗОЛИРОВАННОМ дочернем потоке. Если воркер не ответил за
+// CODE_TIMEOUT_MS — принудительный terminate() (защита event loop от DoS).
+// Возвращает Promise<result>.
 function checkFullCode(rawCode, task) {
   const code  = (rawCode || '').toString();
   const tests = Array.isArray(task.tests) ? task.tests : [];
   const entry = task.entry;
-  if (!code.trim() || !entry || tests.length === 0) return { correct: false };
-
-  const harness = `
-    ${code}
-    ;(function () {
-      if (typeof ${entry} !== 'function') return { defined: false };
-      var __t = ${JSON.stringify(tests)};
-      var passed = 0;
-      for (var i = 0; i < __t.length; i++) {
-        try {
-          var out = ${entry}.apply(null, __t[i].args || []);
-          if (JSON.stringify(out) === JSON.stringify(__t[i].expected)) passed++;
-        } catch (e) { /* провал теста */ }
-      }
-      return { defined: true, passed: passed, total: __t.length };
-    })()
-  `;
-
-  try {
-    const context = vm.createContext(Object.create(null));
-    const res = vm.runInContext(harness, context, { timeout: 1000 });
-    if (!res || !res.defined) {
-      return { correct: false, mode: 'code', reason: `Функция ${entry}(...) не определена` };
-    }
-    return {
-      correct: res.passed === res.total,
-      mode:    'code',
-      passed:  res.passed,
-      total:   res.total,
-    };
-  } catch (e) {
-    return { correct: false, mode: 'code', reason: 'Ошибка выполнения кода' };
+  if (!code.trim() || !entry || tests.length === 0) {
+    return Promise.resolve({ correct: false });
   }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (val) => { if (!settled) { settled = true; resolve(val); } };
+
+    let worker;
+    try {
+      worker = new Worker(WORKER_PATH, { workerData: { code, entry, tests } });
+    } catch (e) {
+      return done({ correct: false, mode: 'code', reason: 'Не удалось запустить изолятор кода' });
+    }
+
+    // Жёсткий предохранитель: убиваем поток, если он завис.
+    const killer = setTimeout(() => {
+      worker.terminate();
+      done({ correct: false, mode: 'code', reason: 'Превышено время выполнения (1000 мс).' });
+    }, CODE_TIMEOUT_MS);
+
+    worker.on('message', (msg) => {
+      clearTimeout(killer);
+      worker.terminate();
+      if (!msg || !msg.ok || !msg.res) {
+        return done({ correct: false, mode: 'code', reason: 'Ошибка выполнения кода' });
+      }
+      const r = msg.res;
+      if (!r.defined) return done({ correct: false, mode: 'code', reason: `Функция ${entry}(...) не определена` });
+      done({ correct: r.passed === r.total, mode: 'code', passed: r.passed, total: r.total });
+    });
+
+    worker.on('error', () => {
+      clearTimeout(killer);
+      worker.terminate();
+      done({ correct: false, mode: 'code', reason: 'Ошибка выполнения кода' });
+    });
+
+    worker.on('exit', () => {
+      clearTimeout(killer);   // если terminate сработал раньше — done уже заблокирован
+      done({ correct: false, mode: 'code', reason: 'Выполнение прервано' });
+    });
+  });
 }
 
-function checkAnswer(rawInput, task) {
+// checkAnswer асинхронна: full_code исполняется в воркере (Promise).
+async function checkAnswer(rawInput, task) {
   // Структурные / исполняемые типы — отдельные проверки
   if (task.type === 'interactive_match') return checkInteractiveMatch(rawInput, task);
   if (task.type === 'full_code')         return checkFullCode(rawInput, task);
@@ -489,21 +511,30 @@ function checkAnswer(rawInput, task) {
   return { correct: false };
 }
 
-function submitAnswer(room, socketId, rawAnswer) {
+async function submitAnswer(room, socketId, rawAnswer) {
   const info = getPlayerTeam(room, socketId);
   if (!info) return { error: 'Игрок не найден в команде' };
   const { team } = info;
 
   if (team.activeTaskId === null) return { error: 'Нет активной задачи' };
+  if (evaluating.has(team)) return { error: 'Идёт проверка предыдущего ответа, подождите' };
 
   const taskId = team.activeTaskId;
   const task = room.taskPool.find(t => t.id === taskId);
   if (!task) return { error: 'Задача не найдена' };
 
+  // Критическая секция под per-team замком (проверка кода асинхронна).
+  evaluating.add(team);
+  try {
   const st = team.taskStatuses[taskId];
   st.attempts += 1;
 
-  const check = checkAnswer(rawAnswer, task);
+  const check = await checkAnswer(rawAnswer, task);
+
+  // Пока шла асинхронная проверка, задача могла закрыться/смениться.
+  if (team.activeTaskId !== taskId || st.status === 'solved' || st.status === 'failed') {
+    return { error: 'Задача уже неактивна' };
+  }
 
   if (check.correct) {
     st.status    = 'solved';
@@ -578,6 +609,9 @@ function submitAnswer(room, socketId, rawAnswer) {
     ...(check.mode === 'code' && check.passed !== undefined && { passed: check.passed, total: check.total }),
     attempts: st.attempts,
   };
+  } finally {
+    evaluating.delete(team);
+  }
 }
 
 function abandonTask(room, socketId) {

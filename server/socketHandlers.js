@@ -265,7 +265,7 @@ function registerHandlers(io, socket) {
   // ── SUBMIT ANSWER ────────────────────────────────────────
   // answer может быть строкой (mc / code_repair / text_phrase / full_code)
   // или объектом сопоставлений (interactive_match) — отсюда type-aware проверка.
-  socket.on('submit_answer', ({ answer } = {}) => {
+  socket.on('submit_answer', async ({ answer } = {}) => {
     const ctx = requireMembership();
     if (!ctx) return;
     const { room, roomId } = ctx;
@@ -274,7 +274,8 @@ function registerHandlers(io, socket) {
     const empty = answer == null || (typeof answer === 'string' && !answer.trim());
     if (empty) return socket.emit('error', { message_ru: 'Введите ответ', code: 'EMPTY_ANSWER' });
 
-    const result = gs.submitAnswer(room, socket.id, answer);
+    // submitAnswer асинхронна: full_code исполняется в дочернем потоке.
+    const result = await gs.submitAnswer(room, socket.id, answer);
     if (result.error) return socket.emit('error', { message_ru: result.error, code: 'ANSWER_ERROR' });
 
     touch(room);
