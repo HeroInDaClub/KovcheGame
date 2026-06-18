@@ -4,6 +4,7 @@
 
 const crypto = require('crypto');
 const gs = require('./gameState');
+const mh = require('./matchHistory');
 const { TASKS, addCustomTask, removeCustomTask } = require('./taskDatabase');
 
 // ── Session Resiliency ───────────────────────────────────
@@ -270,6 +271,7 @@ function registerHandlers(io, socket) {
     room.phase = 'playing';
     // Точный таймер на таймстампе: без ежесекундного декремента/рассылки.
     room.endTimestamp = Date.now() + room.gameDuration * 1000;
+    mh.startMatch(room);   // фиксируем старт матча + снимок состава
     touch(room);
     log(`Игра ${roomId} НАЧАТА (до ${new Date(room.endTimestamp).toISOString()})`);
     io.to(roomId).emit('game_started', {
@@ -287,6 +289,7 @@ function registerHandlers(io, socket) {
       room.phase = 'ended';
       touch(room);
       const scores = buildFinalScores(room);
+      mh.finishMatch(room, scores);
       log(`Игра ${roomId} ЗАВЕРШЕНА — время вышло`);
       io.to(roomId).emit('game_ended', { reason: 'timeout', message_ru: '⏰ Время вышло! Игра завершена.', scores });
       io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
@@ -305,6 +308,7 @@ function registerHandlers(io, socket) {
     if (result.error) return socket.emit('error', { message_ru: result.error, code: 'PICK_ERROR' });
 
     touch(room);
+    mh.log(room, { type: 'pick', team: result.team.teamName, color: result.team.color, taskId: result.task.id, level: result.task.level });
     const captainName = socket.data.playerName;
     log(`Капитан "${captainName}" открыл задачу #${taskId} для команды "${result.team.teamName}"`);
 
@@ -330,12 +334,26 @@ function registerHandlers(io, socket) {
     const empty = answer == null || (typeof answer === 'string' && !answer.trim());
     if (empty) return socket.emit('error', { message_ru: 'Введите ответ', code: 'EMPTY_ANSWER' });
 
+    const beforeScore = ctx.team.score;
     // submitAnswer асинхронна: full_code исполняется в дочернем потоке.
     const result = await gs.submitAnswer(room, socket.id, answer);
     if (result.error) return socket.emit('error', { message_ru: result.error, code: 'ANSWER_ERROR' });
 
     touch(room);
     const playerTeam = gs.getPlayerTeam(room, socket.id);
+    mh.log(room, {
+      type:    'answer',
+      team:    playerTeam?.team.teamName,
+      color:   playerTeam?.team.color,
+      taskId:  result.taskId,
+      correct: !!result.correct,
+      mode:    result.mode || null,
+      attempt: result.attempts ?? null,
+      points:  (playerTeam ? playerTeam.team.score : beforeScore) - beforeScore,
+      answer:  typeof answer === 'string' ? answer.slice(0, 120) : JSON.stringify(answer).slice(0, 160),
+      sector:  result.capturedSector?.name_ru || null,
+      locked:  !!result.locked,
+    });
     log(`Команда "${playerTeam?.team.teamName}" ответила на задачу — ${result.correct ? 'ВЕРНО' : 'НЕВЕРНО'}`);
 
     // Send result to ALL team members
@@ -360,6 +378,7 @@ function registerHandlers(io, socket) {
         room.timerInterval = null;
         room.phase = 'ended';
         const scores = buildFinalScores(room);
+        mh.finishMatch(room, scores);
         log(`Игра ${roomId} ЗАВЕРШЕНА — все секторы захвачены`);
         io.to(roomId).emit('game_ended', {
           reason:     'all_sectors',
@@ -383,6 +402,7 @@ function registerHandlers(io, socket) {
     if (result.error) return socket.emit('error', { message_ru: result.error, code: 'ABANDON_ERROR' });
 
     touch(room);
+    mh.log(room, { type: 'abandon', team: result.teamName, color: team.color, taskId: result.taskId });
     const playerTeam = gs.getPlayerTeam(room, socket.id);
     log(`Команда "${result.teamName}" покинула задачу #${result.taskId}`);
 
@@ -395,6 +415,19 @@ function registerHandlers(io, socket) {
       }
     }
     io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
+  });
+
+  // ── MATCH HISTORY (Teacher tools) ────────────────────────
+  socket.on('admin_get_matches', () => {
+    if (!requireAdmin()) return;
+    socket.emit('matches_list', { matches: mh.summaries() });
+  });
+
+  socket.on('admin_get_match', ({ id } = {}) => {
+    if (!requireAdmin()) return;
+    const match = mh.getMatch(id);
+    if (!match) return socket.emit('error', { message_ru: 'Матч не найден', code: 'MATCH_NOT_FOUND' });
+    socket.emit('match_detail', { match });
   });
 
   // ── CUSTOM TASKS (Teacher tools) ────────────────────────
