@@ -1529,6 +1529,13 @@ const TASKS = [
     ] },
 ];
 
+// ── Импортированные задачи из «Задачи.docx» ──────────────
+try {
+  TASKS.push(...require('./importedTasks'));
+} catch (e) {
+  console.warn('[tasks] importedTasks не загружены:', e.message);
+}
+
 // ── Custom tasks: load from file on startup ──────────────
 const fs   = require('fs');
 const path = require('path');
