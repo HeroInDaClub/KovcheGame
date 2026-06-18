@@ -14,6 +14,12 @@ import GameOver         from './components/GameOver.jsx';
 // 'ended'    → Game over / scores
 // ─────────────────────────────────────────────────────────
 
+// ── Session persistence (для reconnect) ──────────────────
+const SS_KEY = 'aegis_session';
+const loadSession  = () => { try { return JSON.parse(sessionStorage.getItem(SS_KEY)) || {}; } catch { return {}; } };
+const saveSession  = (patch) => sessionStorage.setItem(SS_KEY, JSON.stringify({ ...loadSession(), ...patch }));
+const clearSession = () => sessionStorage.removeItem(SS_KEY);
+
 export default function App() {
   const [view,       setView]       = useState('entry');
   const [roomState,  setRoomState]  = useState(null);
@@ -36,8 +42,16 @@ export default function App() {
   useEffect(() => {
     connect();
 
-    socket.on('connect', () => console.log('[WS] Подключено'));
+    // На каждом (пере)подключении — пытаемся восстановить сессию по токену.
+    socket.on('connect', () => {
+      console.log('[WS] Подключено');
+      const { sessionToken } = loadSession();
+      if (sessionToken) socket.emit('socket_reconnect', { sessionToken });
+    });
     socket.on('disconnect', () => console.log('[WS] Отключено'));
+
+    // Серверный токен сессии — сохраняем для будущего reconnect.
+    socket.on('session', ({ sessionToken }) => saveSession({ sessionToken }));
 
     socket.on('room_created', ({ roomId: id }) => {
       setRoomId(id);
@@ -46,14 +60,33 @@ export default function App() {
 
     socket.on('joined_room', ({ roomId: id }) => {
       setRoomId(id);
+      saveSession({ roomId: id });
       setView('lobby');
     });
 
     socket.on('room_state', (state) => {
       setRoomState(state);
       setEndTimestamp(state.endTimestamp ?? null);   // null в лобби, метка в игре
-      if (state.phase === 'playing' && view !== 'playing') setView('playing');
-      if (state.phase === 'ended'   && view !== 'ended')   setView('ended');
+      setView(v => {
+        if (state.phase === 'playing') return 'playing';
+        if (state.phase === 'ended')   return 'ended';
+        if (state.phase === 'lobby' && v === 'entry') return 'lobby';  // reconnect в лобби
+        return v;
+      });
+    });
+
+    // Успешное восстановление сессии (после reload/обрыва).
+    socket.on('reconnected', ({ roomId: id, isAdmin: admin, playerName: name, teamName }) => {
+      setRoomId(id);
+      setIsAdmin(!!admin);
+      if (name) setPlayerName(name);
+      saveSession({ roomId: id, playerName: name, teamName });
+      notify('🔌 Сессия восстановлена', 3000);
+      // Итоговый view выставит пришедший следом room_state по фазе.
+    });
+
+    socket.on('reconnect_failed', () => {
+      clearSession();   // токен устарел или комната удалена — тихо сбрасываем
     });
 
     socket.on('game_started', ({ message_ru, endTimestamp: end }) => {
@@ -174,8 +207,8 @@ export default function App() {
         playerName={playerName}
         isAdmin={isAdmin}
         notification={notification}
-        onSelectTeam={(teamName) => socket.emit('select_team', { teamName })}
-        onCreateTeam={(teamName) => socket.emit('create_team', { teamName })}
+        onSelectTeam={(teamName) => { saveSession({ teamName }); socket.emit('select_team', { teamName }); }}
+        onCreateTeam={(teamName) => { saveSession({ teamName }); socket.emit('create_team', { teamName }); }}
         onKickMember={(targetId) => socket.emit('kick_member', { targetId })}
         onDeleteTeam={(teamName) => socket.emit('delete_team', { teamName })}
         onStartGame={()          => socket.emit('start_game')}
@@ -195,6 +228,7 @@ export default function App() {
         onCreateRoom={({ adminName, duration, maxTeams, totalTasksCount, difficultyPreset }) => {
           setPlayerName(adminName);
           setIsAdmin(true);
+          saveSession({ playerName: adminName });
           socket.emit('create_room', {
             adminName,
             gameDurationMinutes: duration,
@@ -216,6 +250,7 @@ export default function App() {
       onPlayer={({ name, code }) => {
         setPlayerName(name);
         setIsAdmin(false);
+        saveSession({ playerName: name });
         socket.emit('join_room', { roomId: code.toUpperCase(), playerName: name });
       }}
     />
