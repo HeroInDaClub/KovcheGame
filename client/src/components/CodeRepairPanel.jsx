@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Wrench, X, Send, CheckCircle } from 'lucide-react';
 import CodeBlock  from './CodeBlock.jsx';
-import HintsBlock from './HintsBlock.jsx';
+import TaskImage  from './TaskImage.jsx';
 
-export default function CodeRepairPanel({ task, result, isCaptain, hintsRevealed, revealedHints, onSubmit, onAbandon, onRequestHint }) {
+export default function CodeRepairPanel({ task, result, isCaptain, onSubmit, onAbandon }) {
   const [answer, setAnswer] = useState('');
   const solved = result?.correct === true;
 
@@ -36,14 +36,13 @@ export default function CodeRepairPanel({ task, result, isCaptain, hintsRevealed
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+        <TaskImage url={task.image_url} />
+
         <CodeBlock code={task.code_snippet} language={task.language} />
 
         <div className="text-cyber-text text-sm leading-snug">
           {task.question_ru}
         </div>
-
-        <HintsBlock task={task} hintsRevealed={hintsRevealed} revealedHints={revealedHints}
-                    canReveal={!solved && isCaptain} onRequestHint={onRequestHint} />
 
         {hasOptions ? (
           <div className="space-y-2 pt-1">

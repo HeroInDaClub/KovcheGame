@@ -1,28 +1,28 @@
 import { useState, useEffect } from 'react';
-import { Brain, Send, X } from 'lucide-react';
+import { Terminal, X, Send } from 'lucide-react';
 import TaskImage from './TaskImage.jsx';
 
-// Панель для type='text_phrase' (logic_crypto).
-// Любой участник команды может ввести ответ — задача общекомандная,
-// чтобы стимулировать обсуждение. Покинуть может только капитан.
+// Панель для type='full_code'. Игрок пишет функцию целиком; код уходит строкой
+// на сервер, где прогоняется в vm против набора тестов. Попытки не ограничены,
+// отвечать может любой участник (как в text_phrase). Покидать — только капитан.
 
-export default function TextPhrasePanel({ task, result, isCaptain, onSubmit, onAbandon }) {
-  const [answer, setAnswer] = useState('');
+export default function FullCodePanel({ task, result, isCaptain, onSubmit, onAbandon }) {
+  const [code, setCode] = useState('');
   const solved = result?.correct === true;
 
-  useEffect(() => { setAnswer(''); }, [task.id]);
+  useEffect(() => { setCode(''); }, [task.id]);
 
   const submit = () => {
-    if (!answer.trim() || solved) return;
-    onSubmit(answer.trim());
+    if (!code.trim() || solved) return;
+    onSubmit(code);
   };
 
   return (
     <div className="flex flex-col h-full">
       <div className="border-b border-cyber-border px-4 py-3 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-2">
-          <Brain size={14} className="text-cyber-yellow animate-pulse-neon" />
-          <span className="text-cyber-yellow text-xs font-bold tracking-widest">ЛОГИКА И ШИФР</span>
+          <Terminal size={14} className="text-cyber-neon animate-pulse-neon" />
+          <span className="text-cyber-neon text-xs font-bold tracking-widest">НАПИСАТЬ КОД</span>
         </div>
         <div className="flex items-center gap-2 text-[10px] text-cyber-muted">
           <span>УР.{task.level}</span><span>·</span>
@@ -40,10 +40,10 @@ export default function TextPhrasePanel({ task, result, isCaptain, onSubmit, onA
 
         <div className="text-cyber-text text-sm leading-snug whitespace-pre-wrap">{task.question_ru}</div>
 
-        {task.code_snippet && (
-          <pre className="bg-cyber-black border border-cyber-border text-cyber-blue text-[11px] font-mono p-3 overflow-x-auto whitespace-pre leading-relaxed">
-            {task.code_snippet}
-          </pre>
+        {task.entry && (
+          <div className="text-[10px] text-cyber-muted">
+            Имя функции: <code className="text-cyber-blue font-mono">{task.entry}</code> · язык: JavaScript
+          </div>
         )}
 
         {result && (
@@ -52,10 +52,8 @@ export default function TextPhrasePanel({ task, result, isCaptain, onSubmit, onA
               ? 'border-cyber-neon text-cyber-neon shadow-neon'
               : 'border-cyber-red text-cyber-red'}`}>
             {result.message_ru}
-            {result.submittedAnswer && !result.correct && (
-              <div className="mt-1 text-[10px] text-cyber-muted">
-                Вы ввели: «{result.submittedAnswer}»
-              </div>
+            {!result.correct && result.total != null && (
+              <div className="mt-1 text-[10px] text-cyber-muted">Тесты пройдены: {result.passed}/{result.total}</div>
             )}
           </div>
         )}
@@ -63,19 +61,19 @@ export default function TextPhrasePanel({ task, result, isCaptain, onSubmit, onA
 
       {!solved && (
         <div className="border-t border-cyber-border p-3 flex-shrink-0 space-y-2">
-          <input
-            type="text"
-            value={answer}
-            onChange={e => setAnswer(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && submit()}
-            placeholder="Введите слово, число или фразу…"
-            className="w-full bg-cyber-dark border border-cyber-border text-cyber-text px-3 py-2 text-sm focus:outline-none focus:border-cyber-yellow placeholder:text-cyber-muted"
+          <textarea
+            value={code}
+            onChange={e => setCode(e.target.value)}
+            placeholder={`function ${task.entry || 'solve'}(...) {\n  // ваш код\n}`}
+            spellCheck={false}
+            rows={8}
+            className="w-full bg-cyber-black border border-cyber-border text-cyber-text px-3 py-2 text-xs font-mono focus:outline-none focus:border-cyber-neon placeholder:text-cyber-muted resize-y"
           />
           <div className="flex gap-2">
-            <button onClick={submit} disabled={!answer.trim()}
-              className="flex-1 flex items-center justify-center gap-1 py-2 bg-cyber-yellow text-black text-xs font-bold tracking-widest hover:opacity-90 transition disabled:opacity-30">
+            <button onClick={submit} disabled={!code.trim()}
+              className="flex-1 flex items-center justify-center gap-1 py-2 bg-cyber-neon text-black text-xs font-bold tracking-widest hover:opacity-90 transition disabled:opacity-30">
               <Send size={12} />
-              ОТПРАВИТЬ
+              ЗАПУСТИТЬ ТЕСТЫ
             </button>
             {isCaptain && (
               <button onClick={onAbandon}
@@ -87,7 +85,7 @@ export default function TextPhrasePanel({ task, result, isCaptain, onSubmit, onA
           </div>
           {!isCaptain && (
             <div className="text-[10px] text-cyber-muted text-center italic">
-              Ответить может любой участник — обсудите команды!
+              Код может отправить любой участник — попыток сколько угодно.
             </div>
           )}
         </div>

@@ -182,12 +182,16 @@ function registerHandlers(io, socket) {
   });
 
   // ── SUBMIT ANSWER ────────────────────────────────────────
+  // answer может быть строкой (mc / code_repair / text_phrase / full_code)
+  // или объектом сопоставлений (interactive_match) — отсюда type-aware проверка.
   socket.on('submit_answer', ({ answer } = {}) => {
     const roomId = socket.data.roomId;
     const room = gs.getRoom(roomId);
     if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
     if (room.phase !== 'playing') return socket.emit('error', { message_ru: 'Игра не активна', code: 'GAME_NOT_ACTIVE' });
-    if (!answer?.trim()) return socket.emit('error', { message_ru: 'Введите ответ', code: 'EMPTY_ANSWER' });
+
+    const empty = answer == null || (typeof answer === 'string' && !answer.trim());
+    if (empty) return socket.emit('error', { message_ru: 'Введите ответ', code: 'EMPTY_ANSWER' });
 
     const result = gs.submitAnswer(room, socket.id, answer);
     if (result.error) return socket.emit('error', { message_ru: result.error, code: 'ANSWER_ERROR' });
@@ -229,27 +233,6 @@ function registerHandlers(io, socket) {
     }
   });
 
-  // ── REQUEST HINT (Captain only, −10 очков за каждую) ────
-  socket.on('request_hint', ({ index } = {}) => {
-    const roomId = socket.data.roomId;
-    const room = gs.getRoom(roomId);
-    if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
-    if (room.phase !== 'playing') return socket.emit('error', { message_ru: 'Игра не активна', code: 'GAME_NOT_ACTIVE' });
-
-    const result = gs.revealHint(room, socket.id, index);
-    if (result.error) return socket.emit('error', { message_ru: result.error, code: 'HINT_ERROR' });
-
-    const playerTeam = gs.getPlayerTeam(room, socket.id);
-    log(`Команда "${playerTeam?.team.teamName}" открыла подсказку #${result.hintIndex + 1} к задаче ${result.taskId}`);
-
-    if (playerTeam) {
-      for (const member of playerTeam.team.members) {
-        io.to(member.id).emit('hint_revealed', result);
-      }
-    }
-    io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
-  });
-
   // ── ABANDON TASK ─────────────────────────────────────────
   socket.on('abandon_task', () => {
     const roomId = socket.data.roomId;
@@ -281,7 +264,7 @@ function registerHandlers(io, socket) {
 
   socket.on('admin_add_task', (data = {}) => {
     if (!requireAdmin()) return;
-    const { level, type, category, question_ru, correct_answer, options, hints, code_snippet, lore_description_ru } = data;
+    const { level, type, category, question_ru, correct_answer, options, code_snippet, lore_description_ru } = data;
 
     if (!level || ![1,2,3,4,5].includes(Number(level)))
       return socket.emit('error', { message_ru: 'Укажите уровень (1-5)', code: 'TASK_INVALID' });
@@ -300,7 +283,7 @@ function registerHandlers(io, socket) {
       level: Number(level), type, category,
       question_ru: question_ru.trim(),
       correct_answer: correct_answer.trim(),
-      options, hints, code_snippet, lore_description_ru,
+      options, code_snippet, lore_description_ru,
     });
 
     log(`Добавлена пользовательская задача #${task.id} (L${task.level} ${task.type})`);

@@ -53,7 +53,6 @@ const EMPTY_FORM = {
   correct_answer: '',
   code_snippet: '',
   options: ['', '', '', ''],
-  hints: ['', '', ''],
 };
 
 export default function TaskEditor({ customTasks = [], onAdd, onDelete, lastSaved }) {
@@ -68,11 +67,6 @@ export default function TaskEditor({ customTasks = [], onAdd, onDelete, lastSave
     opts[i] = val;
     return { ...f, options: opts };
   });
-  const setHint = (i, val) => setForm(f => {
-    const hints = [...f.hints];
-    hints[i] = val;
-    return { ...f, hints };
-  });
 
   const handleSubmit = () => {
     if (saving) return;
@@ -82,7 +76,6 @@ export default function TaskEditor({ customTasks = [], onAdd, onDelete, lastSave
       category:      form.category,
       question_ru:   form.question_ru.trim(),
       correct_answer: form.correct_answer.trim(),
-      hints:         form.hints.map(h => h.trim()).filter(Boolean),
       ...(form.code_snippet.trim() && { code_snippet: form.code_snippet.trim() }),
       ...(form.type === 'multiple_choice' && {
         options: form.options.map(o => o.trim()).filter(Boolean),
@@ -213,19 +206,6 @@ export default function TaskEditor({ customTasks = [], onAdd, onDelete, lastSave
             onChange={e => set('correct_answer', e.target.value)}
             placeholder={form.type === 'code_repair' ? 'fib(n-1) + fib(n-2)' : '42'} />
 
-          {/* Hints */}
-          <div className="space-y-1.5">
-            <div className="text-[10px] text-cyber-muted tracking-widest uppercase">Подсказки (−10 очков каждая)</div>
-            <div className="space-y-2">
-              {form.hints.map((h, i) => (
-                <CyberInput key={i}
-                  value={h}
-                  onChange={e => setHint(i, e.target.value)}
-                  placeholder={`Подсказка ${i + 1} (необязательно)`} />
-              ))}
-            </div>
-          </div>
-
           {/* Validation warning for MC */}
           {form.type === 'multiple_choice' &&
            form.correct_answer.trim() &&
@@ -310,11 +290,6 @@ export default function TaskEditor({ customTasks = [], onAdd, onDelete, lastSave
                   {task.type !== 'multiple_choice' && (
                     <div><span className="text-cyber-muted">Ответ: </span>
                       <span className="text-cyber-neon font-mono">{task.correct_answer}</span></div>
-                  )}
-                  {task.hints?.length > 0 && (
-                    <div className="text-cyber-muted text-[10px]">
-                      {task.hints.map((h, i) => <div key={i}>💡 {h}</div>)}
-                    </div>
                   )}
                 </div>
               )}

@@ -2,6 +2,7 @@
 // Aegis-X: Cyber-Siege — In-Memory Game State Manager
 // ============================================================
 
+const vm = require('vm');
 const { TASKS } = require('./taskDatabase');
 
 // До 25 команд — в кибер/греческой тематике, каждая с уникальным неон-цветом
@@ -281,40 +282,9 @@ function pickTask(room, socketId, taskId) {
 
   team.activeTaskId = taskId;
   team.taskStatuses[taskId] = {
-    taskId, status: 'in_progress', attempts: 0, hintsRevealed: 0,
+    taskId, status: 'in_progress', attempts: 0,
   };
   return { task, team };
-}
-
-const HINT_PENALTY = 10;
-
-function revealHint(room, socketId, index) {
-  const info = getPlayerTeam(room, socketId);
-  if (!info) return { error: 'Игрок не найден в команде' };
-  const { team } = info;
-  if (team.captainId !== socketId) return { error: 'Подсказки открывает только капитан' };
-  if (team.activeTaskId === null) return { error: 'Нет активной задачи' };
-
-  const taskId = team.activeTaskId;
-  const task = room.taskPool.find(t => t.id === taskId);
-  if (!task) return { error: 'Задача не найдена' };
-  if (!Array.isArray(task.hints) || task.hints.length === 0) {
-    return { error: 'У этой задачи нет подсказок' };
-  }
-  if (typeof index !== 'number' || index < 0 || index >= task.hints.length) {
-    return { error: 'Неверный индекс подсказки' };
-  }
-
-  const st = team.taskStatuses[taskId];
-  st.hintsRevealed = Math.max(st.hintsRevealed || 0, index + 1);
-
-  return {
-    taskId,
-    hintIndex: index,
-    hint_ru: task.hints[index],
-    hintsRevealed: st.hintsRevealed,
-    penaltyPerHint: HINT_PENALTY,
-  };
 }
 
 // ── Answer matching ─────────────────────────────────────
@@ -350,7 +320,69 @@ function normalize(s) {
     .trim();
 }
 
+// interactive_match: переданная структура должна полностью совпасть с эталоном task.pairs.
+// answer = { matches: { [left]: right } } (или сразу объект { [left]: right }).
+function checkInteractiveMatch(answer, task) {
+  const pairs = Array.isArray(task.pairs) ? task.pairs : [];
+  if (pairs.length === 0 || !answer || typeof answer !== 'object') return { correct: false };
+
+  const matches = (answer.matches && typeof answer.matches === 'object') ? answer.matches : answer;
+  const keys = Object.keys(matches);
+  if (keys.length !== pairs.length) return { correct: false };
+
+  for (const { left, right } of pairs) {
+    if (normalize(matches[left]) !== normalize(right)) return { correct: false };
+  }
+  return { correct: true, mode: 'match' };
+}
+
+// full_code: исходник игрока выполняется в изолированном vm-контексте с таймаутом
+// и прогоняется против task.tests ([{ args, expected }]). entry — имя функции.
+// ⚠️ vm — не криптостойкая песочница; для учебного прототипа (доверенный класс) ОК.
+function checkFullCode(rawCode, task) {
+  const code  = (rawCode || '').toString();
+  const tests = Array.isArray(task.tests) ? task.tests : [];
+  const entry = task.entry;
+  if (!code.trim() || !entry || tests.length === 0) return { correct: false };
+
+  const harness = `
+    ${code}
+    ;(function () {
+      if (typeof ${entry} !== 'function') return { defined: false };
+      var __t = ${JSON.stringify(tests)};
+      var passed = 0;
+      for (var i = 0; i < __t.length; i++) {
+        try {
+          var out = ${entry}.apply(null, __t[i].args || []);
+          if (JSON.stringify(out) === JSON.stringify(__t[i].expected)) passed++;
+        } catch (e) { /* провал теста */ }
+      }
+      return { defined: true, passed: passed, total: __t.length };
+    })()
+  `;
+
+  try {
+    const context = vm.createContext(Object.create(null));
+    const res = vm.runInContext(harness, context, { timeout: 1000 });
+    if (!res || !res.defined) {
+      return { correct: false, mode: 'code', reason: `Функция ${entry}(...) не определена` };
+    }
+    return {
+      correct: res.passed === res.total,
+      mode:    'code',
+      passed:  res.passed,
+      total:   res.total,
+    };
+  } catch (e) {
+    return { correct: false, mode: 'code', reason: 'Ошибка выполнения кода' };
+  }
+}
+
 function checkAnswer(rawInput, task) {
+  // Структурные / исполняемые типы — отдельные проверки
+  if (task.type === 'interactive_match') return checkInteractiveMatch(rawInput, task);
+  if (task.type === 'full_code')         return checkFullCode(rawInput, task);
+
   const input = normalize(rawInput);
   if (!input) return { correct: false };
 
@@ -420,14 +452,11 @@ function submitAnswer(room, socketId, rawAnswer) {
     st.matchMode = check.mode;
     team.activeTaskId = null;
 
-    // Базовая награда минус штраф за подсказки (но не ниже нуля)
-    const base        = getDifficultyPoints(task.level);
-    const hintsUsed   = st.hintsRevealed || 0;
-    const hintPenalty = Math.min(base, hintsUsed * HINT_PENALTY);
-    const earned      = base - hintPenalty;
+    // Полная базовая награда за уровень (механика подсказок удалена)
+    const earned = getDifficultyPoints(task.level);
     team.score += earned;
 
-    // Захват сектора (бонус сектора штрафами НЕ режется)
+    // Захват сектора
     const sector = room.mapSectors.find(s => s.id === task.sector);
     const previousOwner = sector ? sector.capturedBy : null;
     if (sector) {
@@ -436,18 +465,18 @@ function submitAnswer(room, socketId, rawAnswer) {
     }
 
     let modeNote = '';
-    if (check.mode === 'alternate') modeNote = ' (альт. вариант)';
+    if (check.mode === 'alternate')     modeNote = ' (альт. вариант)';
     else if (check.mode === 'keywords') modeNote = ` (ключи ${check.matched}/${check.total})`;
-    const hintNote = hintPenalty > 0 ? ` · −${hintPenalty} за подсказки` : '';
+    else if (check.mode === 'match')    modeNote = ' (сопоставление верно)';
+    else if (check.mode === 'code')     modeNote = ` (тесты ${check.passed}/${check.total})`;
 
     return {
       correct: true,
       taskId,
       mode: check.mode,
-      message_ru: `✅ Верно!${modeNote}${hintNote} Сектор «${sector?.name_ru}» захвачен!`,
+      message_ru: `✅ Верно!${modeNote} Сектор «${sector?.name_ru}» захвачен!`,
       newScore:       team.score,
       capturedSector: sector,
-      hintPenalty,
     };
   }
 
@@ -469,13 +498,26 @@ function submitAnswer(room, socketId, rawAnswer) {
     };
   }
 
-  // Для code_repair и text_phrase — попытки не ограничены
+  // Остальные типы (code_repair / text_phrase / full_code / interactive_match) —
+  // попытки не ограничены.
+  const submitted = typeof rawAnswer === 'string' ? rawAnswer : undefined;
+
+  let msg = `❌ Неверно. Попытка ${st.attempts}. Попробуйте ещё раз или покиньте задачу.`;
+  if (check.mode === 'code') {
+    msg = check.reason
+      ? `❌ ${check.reason} Попытка ${st.attempts}.`
+      : `❌ Тесты пройдены: ${check.passed}/${check.total}. Попытка ${st.attempts}. Исправьте код.`;
+  } else if (task.type === 'interactive_match') {
+    msg = `❌ Сопоставление неверно. Попытка ${st.attempts}. Попробуйте ещё раз.`;
+  }
+
   return {
     correct: false,
     taskId,
-    message_ru:      `❌ Неверно. Попытка ${st.attempts}. Попробуйте ещё раз или покиньте задачу.`,
-    submittedAnswer: String(rawAnswer),
-    attempts:        st.attempts,
+    message_ru: msg,
+    ...(submitted !== undefined && { submittedAnswer: submitted }),
+    ...(check.mode === 'code' && check.passed !== undefined && { passed: check.passed, total: check.total }),
+    attempts: st.attempts,
   };
 }
 
@@ -521,8 +563,6 @@ module.exports = {
   pickTask,
   submitAnswer,
   abandonTask,
-  revealHint,
-  HINT_PENALTY,
   getPublicRoomState,
   deleteRoom,
   // Exposed for tests + future LLM/teacher-review pipelines

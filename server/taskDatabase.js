@@ -11,8 +11,12 @@
 //   • code_repair     — попытки не ограничены
 //   • text_phrase     — попытки не ограничены, case-insensitive,
 //                       стрипает лишние пробелы и пунктуацию
+//   • full_code       — игрок пишет функцию, проверка на сервере (vm + тесты)
+//   • interactive_match — сопоставление пар, проверка структуры на сервере
 //
-// hints: string[] — раскрываются по порядку, каждая −10 очков
+// Подсказки (hints) удалены из игровой механики. В старых записях поле
+// может присутствовать как «мёртвые» данные — оно нигде не читается.
+// Опциональное поле image_url рендерится над текстом вопроса.
 // ============================================================
 
 const TASKS = [
@@ -1456,6 +1460,73 @@ const TASKS = [
       'Шаг 1: сравни соседей: 5>3 (блок 2 выжигается), 3<8 (нет), 8>2 (блок 4 выжигается)',
       'После шага 1 остались блоки: [5, 8]. Проверь: 5 < 8, выжиганий нет. Финал: 2 блока',
     ] },
+
+  // ════════════════════════════════════════════════
+  //  ПРОТОТИПЫ НОВЫХ МЕХАНИК (демо)
+  //  image_url · full_code · interactive_match
+  // ════════════════════════════════════════════════
+
+  // ── multiple_choice с изображением ──
+  { id: '218', level: 2, sector: 3, type: 'multiple_choice', category: 'cs_theory',
+    lore_description_ru: 'Сенсор Aegis-X вывел на экран схему сетевого взаимодействия.',
+    question_ru: 'На изображении — модель передачи данных. Какой протокол обеспечивает надёжную доставку с установлением соединения?',
+    image_url: 'https://picsum.photos/seed/aegis-net/480/240',
+    correct_answer: 'TCP',
+    options: ['TCP', 'UDP', 'ICMP', 'ARP'] },
+
+  // ── text_phrase с изображением ──
+  { id: '219', level: 1, sector: 2, type: 'text_phrase', category: 'logic_crypto',
+    lore_description_ru: 'Диагностический экран показал схему логического вентиля.',
+    question_ru: 'На изображении — логический вентиль с двумя входами, выдающий 1 только если ОБА входа равны 1. Как называется эта операция?',
+    image_url: 'https://picsum.photos/seed/aegis-gate/480/240',
+    correct_answer: 'И',
+    acceptedAnswers: ['and', 'конъюнкция', 'логическое и'] },
+
+  // ── full_code (JS-функция, проверка vm + тесты) ──
+  { id: '220', level: 3, sector: 5, type: 'full_code', category: 'programming',
+    lore_description_ru: 'Модуль навигации требует функцию суммирования телеметрии.',
+    question_ru: 'Напишите функцию sumRange(a, b), возвращающую сумму всех целых от a до b включительно (a ≤ b).',
+    correct_answer: 'function sumRange(a, b) {\n  let s = 0;\n  for (let i = a; i <= b; i++) s += i;\n  return s;\n}',
+    entry: 'sumRange',
+    tests: [
+      { args: [1, 5],   expected: 15 },
+      { args: [0, 0],   expected: 0 },
+      { args: [-3, 3],  expected: 0 },
+      { args: [10, 12], expected: 33 },
+    ] },
+
+  { id: '221', level: 4, sector: 4, type: 'full_code', category: 'programming',
+    lore_description_ru: 'Шифратор шлюза разворачивает строки доступа задом наперёд.',
+    question_ru: 'Напишите функцию reverseString(s), возвращающую строку s, перевёрнутую задом наперёд.',
+    correct_answer: 'function reverseString(s) {\n  return s.split("").reverse().join("");\n}',
+    entry: 'reverseString',
+    tests: [
+      { args: ['aegis'], expected: 'sigea' },
+      { args: [''],      expected: '' },
+      { args: ['ab'],    expected: 'ba' },
+    ] },
+
+  // ── interactive_match (сопоставление пар) ──
+  { id: '222', level: 2, sector: 11, type: 'interactive_match', category: 'logic_crypto',
+    lore_description_ru: 'Система безопасности требует восстановить таблицу протоколов.',
+    question_ru: 'Сопоставьте сетевой протокол с его назначением.',
+    correct_answer: 'HTTP→веб, DNS→имена, SMTP→почта, FTP→файлы',
+    pairs: [
+      { left: 'HTTP', right: 'Передача веб-страниц' },
+      { left: 'DNS',  right: 'Разрешение доменных имён' },
+      { left: 'SMTP', right: 'Отправка электронной почты' },
+      { left: 'FTP',  right: 'Передача файлов' },
+    ] },
+
+  { id: '223', level: 3, sector: 9, type: 'interactive_match', category: 'logic_crypto',
+    lore_description_ru: 'Командный центр: восстановите таблицу единиц информации.',
+    question_ru: 'Сопоставьте величину с её размером.',
+    correct_answer: '1 байт=8 бит, 1 Кбайт=1024 байта, 1 Мбайт=1024 Кбайта',
+    pairs: [
+      { left: '1 байт',     right: '8 бит' },
+      { left: '1 килобайт', right: '1024 байта' },
+      { left: '1 мегабайт', right: '1024 килобайта' },
+    ] },
 ];
 
 // ── Custom tasks: load from file on startup ──────────────
@@ -1484,10 +1555,10 @@ function addCustomTask(data) {
     category:            data.category,
     question_ru:         data.question_ru,
     correct_answer:      data.correct_answer,
-    hints:               data.hints || [],
     isCustom:            true,
     ...(data.options       && { options: data.options }),
     ...(data.code_snippet  && { code_snippet: data.code_snippet }),
+    ...(data.image_url     && { image_url: data.image_url }),
     ...(data.lore_description_ru && { lore_description_ru: data.lore_description_ru }),
   };
   TASKS.push(task);

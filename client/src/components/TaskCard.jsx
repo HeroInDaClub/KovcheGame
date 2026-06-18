@@ -1,4 +1,4 @@
-import { Lock, CheckCircle, Circle, Loader, Star, ListChecks, Code2, Brain, AlertOctagon } from 'lucide-react';
+import { Lock, CheckCircle, Circle, Loader, Star, ListChecks, Code2, Brain, AlertOctagon, Terminal, Link2 } from 'lucide-react';
 
 const STATUS_CONFIG = {
   available:   { icon: Circle,       color: 'text-cyber-muted',  border: 'border-cyber-border',  label: 'Доступна' },
@@ -72,6 +72,16 @@ export default function TaskCard({ task, status = 'available', isCaptain, onPick
               </span>
             )}
           </>
+        )}
+        {task.type === 'full_code' && (
+          <span className="flex items-center gap-1 text-[9px] tracking-widest border border-cyber-neon text-cyber-neon px-1 py-px">
+            <Terminal size={8} /> КОД+
+          </span>
+        )}
+        {task.type === 'interactive_match' && (
+          <span className="flex items-center gap-1 text-[9px] tracking-widest border border-cyber-purple text-cyber-purple px-1 py-px">
+            <Link2 size={8} /> ПАРЫ
+          </span>
         )}
       </div>
 

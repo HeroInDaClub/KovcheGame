@@ -1,11 +1,9 @@
 import { useState, useMemo } from 'react';
-import { Clock, BookOpen } from 'lucide-react';
-import ShipMap             from './ShipMap.jsx';
-import TaskCard            from './TaskCard.jsx';
-import Leaderboard         from './Leaderboard.jsx';
-import MultipleChoicePanel from './MultipleChoicePanel.jsx';
-import CodeRepairPanel     from './CodeRepairPanel.jsx';
-import TextPhrasePanel     from './TextPhrasePanel.jsx';
+import { Clock } from 'lucide-react';
+import ShipMap     from './ShipMap.jsx';
+import TaskCard    from './TaskCard.jsx';
+import Leaderboard from './Leaderboard.jsx';
+import TaskModal   from './TaskModal.jsx';
 
 const LEVEL_LABELS = ['', 'Уровень 1', 'Уровень 2', 'Уровень 3', 'Уровень 4', 'Уровень 5'];
 const LEVEL_COLORS = ['', '#4ae54a', '#99ff44', '#ffd60a', '#ff9f0a', '#ff2d55'];
@@ -18,10 +16,9 @@ function formatTime(seconds) {
 }
 
 export default function Dashboard({
-  roomState, timer, activeTask, taskResult,
-  hintsRevealed, revealedHints,
+  roomState, timer, taskResult,
   playerName, isAdmin, notification,
-  onPickTask, onSubmit, onAbandon, onStartGame, onRequestHint,
+  onPickTask, onSubmit, onAbandon, onStartGame,
 }) {
   const [filterLevel, setFilterLevel] = useState(0);
   const [filterType,  setFilterType]  = useState('all'); // all | multiple_choice | code_repair
@@ -33,6 +30,13 @@ export default function Dashboard({
   const isCaptain = myTeam?.captainId
     ? myTeam.members.find(m => m.name === playerName)?.isCaptain
     : false;
+
+  // Активная задача выводится напрямую из room_state: пока у команды задан
+  // activeTaskId — модалка открыта; сервер очищает его → модалка закрывается.
+  const activeTask = useMemo(() => {
+    const id = myTeam?.activeTaskId;
+    return id ? roomState.taskPool.find(t => t.id === id) : null;
+  }, [myTeam?.activeTaskId, roomState.taskPool]);
 
   const tasksByLevel = useMemo(() => {
     const groups = { 1: [], 2: [], 3: [], 4: [], 5: [] };
@@ -190,46 +194,18 @@ export default function Dashboard({
           </div>
         </main>
 
-        {/* Right: Active Task Panel */}
-        <aside className="w-80 flex-shrink-0 border-l border-cyber-border bg-cyber-panel flex flex-col overflow-hidden hidden md:flex">
-          {activeTask ? (
-            <ActiveTaskDispatcher
-              task={activeTask} result={taskResult} isCaptain={isCaptain}
-              hintsRevealed={hintsRevealed} revealedHints={revealedHints}
-              onSubmit={onSubmit} onAbandon={onAbandon} onRequestHint={onRequestHint}
-            />
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-cyber-muted gap-3">
-              <BookOpen size={32} strokeWidth={1} />
-              <div className="text-xs">
-                {isCaptain
-                  ? 'Выберите задачу из сетки слева, чтобы открыть её для всей команды.'
-                  : 'Ожидайте, пока капитан выберет задачу.'}
-              </div>
-            </div>
-          )}
-        </aside>
       </div>
 
-      {/* Mobile: Active Task Modal */}
-      {activeTask && (
-        <div className="md:hidden fixed inset-0 z-40 bg-cyber-dark/95 flex flex-col">
-          <ActiveTaskDispatcher
-            task={activeTask} result={taskResult} isCaptain={isCaptain}
-            onSubmit={onSubmit} onAbandon={onAbandon}
-          />
-        </div>
-      )}
+      {/* Активная задача — модальное окно. Открыто, пока в room_state у команды
+          задан activeTaskId; закрывается, когда сервер его очистит (решено/покинуто). */}
+      <TaskModal
+        task={activeTask}
+        result={taskResult}
+        isCaptain={isCaptain}
+        onSubmit={onSubmit}
+        onAbandon={onAbandon}
+      />
     </div>
   );
-}
-
-// ── Активная задача: диспатчер по типу ─────────────────────
-function ActiveTaskDispatcher({ task, result, isCaptain, hintsRevealed, revealedHints, onSubmit, onAbandon, onRequestHint }) {
-  const common = { task, result, isCaptain, hintsRevealed, revealedHints, onSubmit, onAbandon, onRequestHint };
-  if (task.type === 'multiple_choice') return <MultipleChoicePanel {...common} />;
-  if (task.type === 'code_repair')     return <CodeRepairPanel     {...common} />;
-  if (task.type === 'text_phrase')     return <TextPhrasePanel     {...common} />;
-  return <div className="p-6 text-cyber-red text-xs">Неизвестный тип задачи: {task.type}</div>;
 }
 

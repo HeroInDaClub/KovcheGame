@@ -5,19 +5,31 @@
 export type DifficultyLevel = 1 | 2 | 3 | 4 | 5;
 export type TaskStatusValue  = 'available' | 'in_progress' | 'solved' | 'abandoned' | 'failed';
 export type GamePhase        = 'lobby' | 'playing' | 'ended';
-export type TaskType         = 'multiple_choice' | 'code_repair' | 'text_phrase';
+export type TaskType         = 'multiple_choice' | 'code_repair' | 'text_phrase' | 'full_code' | 'interactive_match';
 export type TaskCategory     = 'logic_crypto' | 'cs_theory' | 'programming';
 export type CodeLanguage     = 'python' | 'kumir' | 'pascal';
-export type AnswerMatchMode  = 'exact' | 'alternate' | 'keywords' | 'choice';
+export type AnswerMatchMode  = 'exact' | 'alternate' | 'keywords' | 'choice' | 'code' | 'match';
 
 // ── Task Schema ────────────────────────────────────────────
-// Three mechanics:
-//   • multiple_choice (cs_theory)   — 4 кнопки, ОДНА попытка → status='failed' при ошибке
-//   • code_repair     (programming) — код с ▓▓▓; неограниченные попытки
-//   • text_phrase     (logic_crypto) — текстовый ввод; неограниченные попытки
-//
-// Распределение в пуле сессии (50 карт): 40% logic / 30% MC / 30% CR
+// Mechanics:
+//   • multiple_choice  (cs_theory)   — 4 кнопки, ОДНА попытка → status='failed' при ошибке
+//   • code_repair      (programming) — код с ▓▓▓; неограниченные попытки
+//   • text_phrase      (logic_crypto)— текстовый ввод; неограниченные попытки
+//   • full_code        (programming) — написать функцию; проверка на сервере (vm + тесты)
+//   • interactive_match(logic_crypto)— сопоставление пар; проверка структуры на сервере
 // ───────────────────────────────────────────────────────────
+
+// Один тест-кейс для full_code: вызвать entry-функцию с args, сверить с expected.
+export interface FullCodeTest {
+  args:     any[];
+  expected: any;
+}
+
+// Пара «левое → правое» для interactive_match (эталон сопоставления).
+export interface MatchPair {
+  left:  string;
+  right: string;
+}
 
 export interface Task {
   id:                  string;
@@ -30,6 +42,9 @@ export interface Task {
   question_ru:         string;
   correct_answer:      string;
 
+  // Необязательное изображение, рендерится над текстом вопроса
+  image_url?:          string;
+
   // Для code_repair
   language?:           CodeLanguage;
   code_snippet?:       string;
@@ -37,8 +52,12 @@ export interface Task {
   // Для multiple_choice (обязательно 4); опц. для code_repair (select-mode)
   options?:            string[];
 
-  // Прогрессивные подсказки; каждая открытая = -10 очков от награды
-  hints?:              string[];
+  // Для full_code: имя проверяемой функции + набор тестов
+  entry?:              string;
+  tests?:              FullCodeTest[];
+
+  // Для interactive_match: эталонные пары соответствий
+  pairs?:              MatchPair[];
 
   // Доп. варианты приёма (для text_phrase и code_repair)
   acceptedAnswers?:    string[];
@@ -51,7 +70,6 @@ export interface TaskStatus {
   solvedBy?:      string;
   attempts:       number;
   matchMode?:     AnswerMatchMode;
-  hintsRevealed:  number;          // сколько подсказок раскрыли (для штрафа)
   failedAnswer?:  string;          // что прислали при провале MC (для отрисовки)
 }
 
@@ -97,8 +115,20 @@ export interface CreateRoomPayload   { adminName: string; gameDurationMinutes?: 
 export interface JoinRoomPayload     { roomId: string; playerName: string; }
 export interface SelectTeamPayload   { teamName: string; }
 export interface PickTaskPayload     { taskId: string; }
-export interface SubmitAnswerPayload { answer: string; hintsUsed?: number; }
-export interface RequestHintPayload  { index: number; }
+
+// answer в submit_answer зависит от типа активной задачи:
+//   • строка                         — multiple_choice / code_repair / text_phrase / full_code
+//   • InteractiveMatchAnswer (объект) — interactive_match
+export type SubmitAnswerValue = string | InteractiveMatchAnswer;
+export interface SubmitAnswerPayload { answer: SubmitAnswerValue; }
+
+// full_code: игрок присылает исходник функции строкой (см. SubmitAnswerPayload.answer)
+export type FullCodeAnswer = string;
+
+// interactive_match: сопоставления в виде { [left]: right }
+export interface InteractiveMatchAnswer {
+  matches: Record<string, string>;
+}
 
 export interface RoomCreatedPayload  { roomId: string; adminId: string; }
 export interface TaskOpenedPayload   { task: Task; openedBy: string; }
@@ -111,16 +141,10 @@ export interface TaskResultPayload {
   capturedSector?:  MapSector;
   attempts?:        number;
   submittedAnswer?: string;       // что прислал игрок (для подсветки опций)
-  correctAnswer?:   string;       // показывается ТОЛЬКО при provals MC
-  hintPenalty?:     number;       // сколько очков ушло на подсказки
+  correctAnswer?:   string;       // показывается ТОЛЬКО при провале MC
+  passed?:          number;       // full_code: сколько тестов пройдено
+  total?:           number;       // full_code: всего тестов
   locked?:          boolean;      // true → задача больше не доступна
-}
-export interface HintRevealedPayload {
-  taskId:         string;
-  hintIndex:      number;
-  hint_ru:        string;
-  hintsRevealed:  number;
-  penaltyPerHint: number;
 }
 export interface ErrorPayload        { message_ru: string; code?: string; }
 

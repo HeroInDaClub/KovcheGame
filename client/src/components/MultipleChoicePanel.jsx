@@ -1,5 +1,5 @@
 import { CheckCircle, XCircle, X, Zap, AlertOctagon } from 'lucide-react';
-import HintsBlock from './HintsBlock.jsx';
+import TaskImage from './TaskImage.jsx';
 
 // ⚠️ ONE-SHOT: ровно ОДНА попытка. После любого ответа (верный/неверный)
 // блок ответов «замораживается» — никаких повторов.
@@ -7,7 +7,7 @@ import HintsBlock from './HintsBlock.jsx';
 //   • неверный → задача failed (красный, разблокировать нельзя)
 // Подсветка: выбор игрока — синим/красным, правильный ответ — зелёным.
 
-export default function MultipleChoicePanel({ task, result, isCaptain, hintsRevealed, revealedHints, onSubmit, onAbandon, onRequestHint }) {
+export default function MultipleChoicePanel({ task, result, isCaptain, onSubmit, onAbandon }) {
   const solved   = result?.correct === true;
   const failed   = result?.correct === false;
   const answered = solved || failed;
@@ -40,10 +40,9 @@ export default function MultipleChoicePanel({ task, result, isCaptain, hintsReve
 
       {/* Body */}
       <div className="px-4 py-3 flex-1 overflow-y-auto space-y-3">
-        <div className="text-cyber-text text-sm leading-snug">{task.question_ru}</div>
+        <TaskImage url={task.image_url} />
 
-        <HintsBlock task={task} hintsRevealed={hintsRevealed} revealedHints={revealedHints}
-                    canReveal={!answered && isCaptain} onRequestHint={onRequestHint} />
+        <div className="text-cyber-text text-sm leading-snug">{task.question_ru}</div>
 
         {/* 4 кнопки. ВАЖНО: disabled после ЛЮБОГО ответа */}
         <div className="space-y-2 pt-1">
