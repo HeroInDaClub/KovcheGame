@@ -32,6 +32,27 @@ function registerHandlers(io, socket) {
   // Отметка активности комнаты — питает Room Reaper (см. gameState reaper).
   const touch = (room) => { if (room) room.lastActivityAt = Date.now(); };
 
+  // Жёсткая проверка членства: сокет реально присоединён к комнате (transport-уровень)
+  // И состоит в команде этой комнаты. Возвращает контекст либо null (с emit ошибки).
+  const requireMembership = () => {
+    const roomId = socket.data.roomId;
+    if (!roomId || !socket.rooms.has(roomId)) {
+      socket.emit('error', { message_ru: 'Вы не в комнате', code: 'NOT_IN_ROOM' });
+      return null;
+    }
+    const room = gs.getRoom(roomId);
+    if (!room) {
+      socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
+      return null;
+    }
+    const info = gs.getPlayerTeam(room, socket.id);
+    if (!info) {
+      socket.emit('error', { message_ru: 'Вы не состоите в команде этой комнаты', code: 'NOT_IN_TEAM' });
+      return null;
+    }
+    return { room, roomId, team: info.team, player: info.player };
+  };
+
   // ── ADMIN AUTH (вход учителя по логину/паролю) ───────────
   // Проверка идёт по коллекции зарегистрированных учителей (teachers)
   // + резервному суперпользователю (SUPERUSER / ADMIN_PASSWORD).
@@ -218,10 +239,11 @@ function registerHandlers(io, socket) {
 
   // ── PICK TASK (Captain only) ─────────────────────────────
   socket.on('pick_task', ({ taskId } = {}) => {
-    const roomId = socket.data.roomId;
-    const room = gs.getRoom(roomId);
-    if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
+    const ctx = requireMembership();
+    if (!ctx) return;
+    const { room, roomId, team } = ctx;
     if (room.phase !== 'playing') return socket.emit('error', { message_ru: 'Игра не активна', code: 'GAME_NOT_ACTIVE' });
+    if (team.captainId !== socket.id) return socket.emit('error', { message_ru: 'Выбирать задачи может только капитан', code: 'NOT_CAPTAIN' });
 
     const result = gs.pickTask(room, socket.id, taskId);
     if (result.error) return socket.emit('error', { message_ru: result.error, code: 'PICK_ERROR' });
@@ -244,9 +266,9 @@ function registerHandlers(io, socket) {
   // answer может быть строкой (mc / code_repair / text_phrase / full_code)
   // или объектом сопоставлений (interactive_match) — отсюда type-aware проверка.
   socket.on('submit_answer', ({ answer } = {}) => {
-    const roomId = socket.data.roomId;
-    const room = gs.getRoom(roomId);
-    if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
+    const ctx = requireMembership();
+    if (!ctx) return;
+    const { room, roomId } = ctx;
     if (room.phase !== 'playing') return socket.emit('error', { message_ru: 'Игра не активна', code: 'GAME_NOT_ACTIVE' });
 
     const empty = answer == null || (typeof answer === 'string' && !answer.trim());
@@ -295,9 +317,10 @@ function registerHandlers(io, socket) {
 
   // ── ABANDON TASK ─────────────────────────────────────────
   socket.on('abandon_task', () => {
-    const roomId = socket.data.roomId;
-    const room = gs.getRoom(roomId);
-    if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
+    const ctx = requireMembership();
+    if (!ctx) return;
+    const { room, roomId, team } = ctx;
+    if (team.captainId !== socket.id) return socket.emit('error', { message_ru: 'Покинуть задачу может только капитан', code: 'NOT_CAPTAIN' });
 
     const result = gs.abandonTask(room, socket.id);
     if (result.error) return socket.emit('error', { message_ru: result.error, code: 'ABANDON_ERROR' });

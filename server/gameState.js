@@ -585,6 +585,7 @@ function abandonTask(room, socketId) {
   if (!info) return { error: 'Игрок не найден в команде' };
   const { team } = info;
 
+  if (team.captainId !== socketId) return { error: 'Покинуть задачу может только капитан' };
   if (team.activeTaskId === null) return { error: 'Нет активной задачи' };
 
   const taskId = team.activeTaskId;
