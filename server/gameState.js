@@ -304,6 +304,29 @@ function kickMember(room, captainSocketId, targetId) {
   return { kickedId: targetId, kickedName: kicked.name, teamName: team.teamName };
 }
 
+// Reconnect: привязать новый socket.id вместо старого по всей комнате —
+// восстанавливает капитанство (captainId), права создателя (adminId) и id
+// участника, снимает флаг offline. Защита от сиротства комнаты.
+function rebindSocket(room, oldId, newId) {
+  let rebound = false;
+  if (room.adminId === oldId) { room.adminId = newId; rebound = true; }
+  for (const team of Object.values(room.teams)) {
+    if (team.captainId === oldId) team.captainId = newId;
+    const m = team.members.find(x => x.id === oldId);
+    if (m) { m.id = newId; m.offline = false; rebound = true; }
+  }
+  return rebound;
+}
+
+// Пометить участника online/offline (для индикации в лобби на время grace-периода).
+function setMemberOffline(room, socketId, offline) {
+  for (const team of Object.values(room.teams)) {
+    const m = team.members.find(x => x.id === socketId);
+    if (m) { m.offline = offline; return true; }
+  }
+  return false;
+}
+
 // Учитель полностью удаляет команду → все её участники сбрасываются в лобби.
 function deleteTeam(room, requesterId, teamName) {
   if (room.adminId !== requesterId) return { error: 'Удалять команды может только учитель' };
@@ -692,6 +715,8 @@ module.exports = {
   createTeam,
   kickMember,
   deleteTeam,
+  rebindSocket,
+  setMemberOffline,
   removePlayer,
   getPlayerTeam,
   pickTask,

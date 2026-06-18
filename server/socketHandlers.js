@@ -2,8 +2,20 @@
 // Aegis-X: Cyber-Siege — Socket.io Event Handlers
 // ============================================================
 
+const crypto = require('crypto');
 const gs = require('./gameState');
 const { TASKS, addCustomTask, removeCustomTask } = require('./taskDatabase');
+
+// ── Session Resiliency ───────────────────────────────────
+// Сессии переподключения: Map<sessionToken, {...}>. Память сервера (сброс при
+// рестарте). При disconnect игрок не удаляется сразу — действует grace-период.
+const sessions = new Map();
+const GRACE_MS = 45 * 1000;
+
+const sessionBySocket = (sid) => {
+  for (const s of sessions.values()) if (s.socketId === sid) return s;
+  return null;
+};
 
 // Пароль учителя. Задаётся через переменную окружения ADMIN_PASSWORD,
 // иначе используется значение по умолчанию (ОБЯЗАТЕЛЬНО смените на проде!).
@@ -31,6 +43,42 @@ function registerHandlers(io, socket) {
 
   // Отметка активности комнаты — питает Room Reaper (см. gameState reaper).
   const touch = (room) => { if (room) room.lastActivityAt = Date.now(); };
+
+  // Создать/обновить сессию текущего сокета и отдать токен клиенту.
+  const ensureSession = (patch = {}) => {
+    let token = socket.data.sessionToken;
+    let session = token ? sessions.get(token) : null;
+    if (!session) {
+      token = crypto.randomUUID();
+      session = {
+        roomId: null, playerName: null, teamName: null,
+        isCaptain: false, isAdmin: false, username: null,
+        socketId: socket.id, offline: false, timeoutId: null,
+      };
+      sessions.set(token, session);
+      socket.data.sessionToken = token;
+    }
+    Object.assign(session, patch, { socketId: socket.id });
+    socket.emit('session', { sessionToken: token });
+    return session;
+  };
+
+  const updateSessionTeam = (teamName, isCaptain) => {
+    const s = socket.data.sessionToken ? sessions.get(socket.data.sessionToken) : null;
+    if (s) { s.teamName = teamName; s.isCaptain = isCaptain; }
+  };
+
+  // Окончательное удаление по истечении grace-периода.
+  const finalizeSession = (token) => {
+    const session = sessions.get(token);
+    if (!session) return;
+    sessions.delete(token);
+    const room = gs.removePlayer(session.socketId);  // передаёт капитанство, чистит пустые команды
+    if (room) {
+      touch(room);
+      io.to(room.roomId).emit('room_state', gs.getPublicRoomState(room));
+    }
+  };
 
   // Жёсткая проверка членства: сокет реально присоединён к комнате (transport-уровень)
   // И состоит в команде этой комнаты. Возвращает контекст либо null (с emit ошибки).
@@ -72,6 +120,7 @@ function registerHandlers(io, socket) {
 
     socket.data.isAdmin  = true;
     socket.data.username = key;
+    ensureSession({ isAdmin: true, username: key });
     log(`Учитель авторизован: "${key}"`);
     socket.emit('admin_auth_result', { ok: true });
   });
@@ -131,6 +180,7 @@ function registerHandlers(io, socket) {
     socket.join(roomId.toUpperCase().trim());
     socket.data.playerName = playerName.trim();
     socket.data.roomId = roomId.toUpperCase().trim();
+    ensureSession({ roomId: socket.data.roomId, playerName: socket.data.playerName, isAdmin: !!socket.data.isAdmin });
     touch(result.room);
     log(`"${playerName}" вошёл в комнату ${roomId}`);
     socket.emit('joined_room', { roomId: roomId.toUpperCase().trim() });
@@ -149,6 +199,7 @@ function registerHandlers(io, socket) {
     if (result.error) return socket.emit('error', { message_ru: result.error, code: 'TEAM_ERROR' });
 
     touch(room);
+    updateSessionTeam(result.player.teamName, result.player.isCaptain);
     log(`"${socket.data.playerName}" вошёл в команду "${teamName}" (капитан: ${result.player.isCaptain})`);
     io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
   });
@@ -165,6 +216,7 @@ function registerHandlers(io, socket) {
     if (result.error) return socket.emit('error', { message_ru: result.error, code: 'TEAM_ERROR' });
 
     touch(room);
+    updateSessionTeam(result.team.teamName, true);
     log(`"${socket.data.playerName}" создал команду "${result.team.teamName}"`);
     io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
   });
@@ -180,6 +232,8 @@ function registerHandlers(io, socket) {
     if (result.error) return socket.emit('error', { message_ru: result.error, code: 'KICK_ERROR' });
 
     touch(room);
+    const ks = sessionBySocket(result.kickedId);
+    if (ks) { ks.teamName = null; ks.isCaptain = false; }
     log(`Капитан исключил "${result.kickedName}" из "${result.teamName}"`);
     io.to(result.kickedId).emit('error', { message_ru: `Вас исключили из команды «${result.teamName}»`, code: 'KICKED' });
     io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
@@ -198,6 +252,8 @@ function registerHandlers(io, socket) {
     touch(room);
     log(`Учитель удалил команду "${result.teamName}"`);
     for (const id of result.memberIds) {
+      const ms = sessionBySocket(id);
+      if (ms) { ms.teamName = null; ms.isCaptain = false; }
       io.to(id).emit('error', { message_ru: `Команда «${result.teamName}» удалена учителем`, code: 'TEAM_DELETED' });
     }
     io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
@@ -388,13 +444,70 @@ function registerHandlers(io, socket) {
   });
 
   // ── DISCONNECT ───────────────────────────────────────────
-  socket.on('disconnect', () => {
-    const room = gs.removePlayer(socket.id);
-    if (room) {
-      touch(room);
-      log(`Игрок "${socket.data.playerName}" отключился от ${room.roomId}`);
-      io.to(room.roomId).emit('room_state', gs.getPublicRoomState(room));
+  // ── RECONNECT по токену сессии ───────────────────────────
+  socket.on('socket_reconnect', ({ sessionToken } = {}) => {
+    const session = sessionToken ? sessions.get(sessionToken) : null;
+    if (!session) {
+      return socket.emit('reconnect_failed', { message_ru: 'Сессия не найдена или истекла' });
     }
+    const room = gs.getRoom(session.roomId);
+    if (!room) {
+      sessions.delete(sessionToken);
+      return socket.emit('reconnect_failed', { message_ru: 'Комната уже не существует' });
+    }
+
+    // Отменяем отложенное удаление, возвращаем online
+    if (session.timeoutId) { clearTimeout(session.timeoutId); session.timeoutId = null; }
+    session.offline = false;
+
+    const oldId = session.socketId;
+    const newId = socket.id;
+
+    // Привязываем новый сокет (transport + данные)
+    socket.join(session.roomId);
+    socket.data.sessionToken = sessionToken;
+    socket.data.roomId       = session.roomId;
+    socket.data.playerName   = session.playerName;
+    socket.data.isAdmin      = session.isAdmin;
+    if (session.username) socket.data.username = session.username;
+
+    // Восстанавливаем капитанство / adminId / id участника
+    gs.rebindSocket(room, oldId, newId);
+    session.socketId = newId;
+
+    touch(room);
+    log(`Reconnect: "${session.playerName || 'учитель'}" → ${session.roomId} (admin=${session.isAdmin})`);
+    socket.emit('reconnected', {
+      roomId:    session.roomId,
+      isAdmin:   session.isAdmin,
+      playerName: session.playerName,
+      teamName:  session.teamName,
+    });
+    io.to(session.roomId).emit('room_state', gs.getPublicRoomState(room));
+  });
+
+  // ── DISCONNECT с grace-периодом ──────────────────────────
+  socket.on('disconnect', () => {
+    const token = socket.data.sessionToken;
+    const session = token ? sessions.get(token) : null;
+
+    // Нет сессии (или сокет уже переподключён под другим id) — мгновенная очистка.
+    if (!session || session.socketId !== socket.id) {
+      const room = gs.removePlayer(socket.id);
+      if (room) { touch(room); io.to(room.roomId).emit('room_state', gs.getPublicRoomState(room)); }
+      return;
+    }
+
+    // Переводим в offline и запускаем отложенное удаление.
+    session.offline = true;
+    const room = gs.getRoom(session.roomId);
+    if (room) {
+      gs.setMemberOffline(room, socket.id, true);
+      touch(room);
+      io.to(session.roomId).emit('room_state', gs.getPublicRoomState(room));
+    }
+    log(`Игрок "${session.playerName || 'учитель'}" отключился — grace ${GRACE_MS / 1000}с`);
+    session.timeoutId = setTimeout(() => finalizeSession(token), GRACE_MS);
   });
 }
 
