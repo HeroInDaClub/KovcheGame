@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { socket } from '../socket.js';
-import { Users, Layers, Cpu, Clock, BookOpen, Settings } from 'lucide-react';
+import { Users, Layers, Cpu, Clock, BookOpen, Settings, History } from 'lucide-react';
 import TaskEditor from './TaskEditor.jsx';
+import MatchHistory from './MatchHistory.jsx';
 
 // ── Кнопка-вариант в стиле cyber-neon ───────────────────
 function OptionBtn({ active, color = 'neon', onClick, children }) {
@@ -99,6 +100,11 @@ export default function AdminPanel({ notification, onCreateRoom, roomId, customT
               className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold tracking-widest transition border-b-2
                 ${tab === 'tasks' ? 'border-cyber-purple text-cyber-purple' : 'border-transparent text-cyber-muted hover:text-cyber-text'}`}>
               <BookOpen size={11} /> ЗАДАНИЯ {customTasks?.length > 0 && <span className="text-cyber-neon">({customTasks.length})</span>}
+            </button>
+            <button onClick={() => setTab('history')}
+              className={`flex items-center gap-1.5 px-4 py-2 text-xs font-bold tracking-widest transition border-b-2
+                ${tab === 'history' ? 'border-cyber-purple text-cyber-purple' : 'border-transparent text-cyber-muted hover:text-cyber-text'}`}>
+              <History size={11} /> ИСТОРИЯ
             </button>
           </div>
         </div>
@@ -215,6 +221,9 @@ export default function AdminPanel({ notification, onCreateRoom, roomId, customT
             lastSaved={lastSaved}
           />
         )}
+
+        {/* ── ВКЛАДКА: ИСТОРИЯ МАТЧЕЙ ─────────────────────── */}
+        {tab === 'history' && <MatchHistory />}
 
       </div>
     </div>
