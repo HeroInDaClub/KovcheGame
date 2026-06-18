@@ -14,14 +14,21 @@ import GameOver         from './components/GameOver.jsx';
 // 'ended'    → Game over / scores
 // ─────────────────────────────────────────────────────────
 
+// ── Session persistence (для reconnect) ──────────────────
+const SS_KEY = 'aegis_session';
+const loadSession  = () => { try { return JSON.parse(sessionStorage.getItem(SS_KEY)) || {}; } catch { return {}; } };
+const saveSession  = (patch) => sessionStorage.setItem(SS_KEY, JSON.stringify({ ...loadSession(), ...patch }));
+const clearSession = () => sessionStorage.removeItem(SS_KEY);
+
 export default function App() {
   const [view,       setView]       = useState('entry');
   const [roomState,  setRoomState]  = useState(null);
   const [roomId,     setRoomId]     = useState('');
   const [playerName, setPlayerName] = useState('');
   const [isAdmin,    setIsAdmin]    = useState(false);
-  const [timer,      setTimer]      = useState(null);
-  const [taskResult, setTaskResult] = useState(null);
+  const [timer,        setTimer]        = useState(null);
+  const [endTimestamp, setEndTimestamp] = useState(null);
+  const [taskResult,   setTaskResult]   = useState(null);
   const [gameOver,   setGameOver]   = useState(null);
   const [notification, setNotif]   = useState('');
   const [customTasks,  setCustomTasks] = useState([]);
@@ -35,8 +42,16 @@ export default function App() {
   useEffect(() => {
     connect();
 
-    socket.on('connect', () => console.log('[WS] Подключено'));
+    // На каждом (пере)подключении — пытаемся восстановить сессию по токену.
+    socket.on('connect', () => {
+      console.log('[WS] Подключено');
+      const { sessionToken } = loadSession();
+      if (sessionToken) socket.emit('socket_reconnect', { sessionToken });
+    });
     socket.on('disconnect', () => console.log('[WS] Отключено'));
+
+    // Серверный токен сессии — сохраняем для будущего reconnect.
+    socket.on('session', ({ sessionToken }) => saveSession({ sessionToken }));
 
     socket.on('room_created', ({ roomId: id }) => {
       setRoomId(id);
@@ -45,22 +60,39 @@ export default function App() {
 
     socket.on('joined_room', ({ roomId: id }) => {
       setRoomId(id);
+      saveSession({ roomId: id });
       setView('lobby');
     });
 
     socket.on('room_state', (state) => {
       setRoomState(state);
-      if (state.phase === 'playing' && view !== 'playing') setView('playing');
-      if (state.phase === 'ended'   && view !== 'ended')   setView('ended');
+      setEndTimestamp(state.endTimestamp ?? null);   // null в лобби, метка в игре
+      setView(v => {
+        if (state.phase === 'playing') return 'playing';
+        if (state.phase === 'ended')   return 'ended';
+        if (state.phase === 'lobby' && v === 'entry') return 'lobby';  // reconnect в лобби
+        return v;
+      });
     });
 
-    socket.on('game_started', ({ message_ru }) => {
+    // Успешное восстановление сессии (после reload/обрыва).
+    socket.on('reconnected', ({ roomId: id, isAdmin: admin, playerName: name, teamName }) => {
+      setRoomId(id);
+      setIsAdmin(!!admin);
+      if (name) setPlayerName(name);
+      saveSession({ roomId: id, playerName: name, teamName });
+      notify('🔌 Сессия восстановлена', 3000);
+      // Итоговый view выставит пришедший следом room_state по фазе.
+    });
+
+    socket.on('reconnect_failed', () => {
+      clearSession();   // токен устарел или комната удалена — тихо сбрасываем
+    });
+
+    socket.on('game_started', ({ message_ru, endTimestamp: end }) => {
       notify(message_ru, 5000);
+      if (end) setEndTimestamp(end);
       setView('playing');
-    });
-
-    socket.on('timer_tick', ({ remaining }) => {
-      setTimer(remaining);
     });
 
     // Модалка задачи открывается/закрывается по activeTaskId в room_state.
@@ -122,10 +154,18 @@ export default function App() {
     };
   }, []); // eslint-disable-line
 
-  // Keep timer in sync with roomState when re-joining
+  // Точный локальный таймер: считаем remaining от серверного endTimestamp.
+  // Пока игра не началась (endTimestamp == null) — показываем полную длительность.
   useEffect(() => {
-    if (roomState && timer === null) setTimer(roomState.globalTimer);
-  }, [roomState]);
+    if (!endTimestamp) {
+      setTimer(roomState ? roomState.gameDuration : null);
+      return;
+    }
+    const tick = () => setTimer(Math.max(0, Math.floor((endTimestamp - Date.now()) / 1000)));
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, [endTimestamp, roomState?.gameDuration]);
 
   if (view === 'ended' && gameOver) {
     return <GameOver gameOver={gameOver} roomState={roomState} />;
@@ -136,7 +176,7 @@ export default function App() {
       return (
         <TeacherDashboard
           roomState={roomState}
-          timer={timer ?? roomState.globalTimer}
+          timer={timer ?? roomState.gameDuration}
           isAdmin={isAdmin}
           notification={notification}
           onStartGame={() => socket.emit('start_game')}
@@ -146,7 +186,7 @@ export default function App() {
     return (
       <Dashboard
         roomState={roomState}
-        timer={timer ?? roomState.globalTimer}
+        timer={timer ?? roomState.gameDuration}
         taskResult={taskResult}
         playerName={playerName}
         isAdmin={isAdmin}
@@ -167,7 +207,10 @@ export default function App() {
         playerName={playerName}
         isAdmin={isAdmin}
         notification={notification}
-        onSelectTeam={(teamName) => socket.emit('select_team', { teamName })}
+        onSelectTeam={(teamName) => { saveSession({ teamName }); socket.emit('select_team', { teamName }); }}
+        onCreateTeam={(teamName) => { saveSession({ teamName }); socket.emit('create_team', { teamName }); }}
+        onKickMember={(targetId) => socket.emit('kick_member', { targetId })}
+        onDeleteTeam={(teamName) => socket.emit('delete_team', { teamName })}
         onStartGame={()          => socket.emit('start_game')}
       />
     );
@@ -185,6 +228,7 @@ export default function App() {
         onCreateRoom={({ adminName, duration, maxTeams, totalTasksCount, difficultyPreset }) => {
           setPlayerName(adminName);
           setIsAdmin(true);
+          saveSession({ playerName: adminName });
           socket.emit('create_room', {
             adminName,
             gameDurationMinutes: duration,
@@ -206,6 +250,7 @@ export default function App() {
       onPlayer={({ name, code }) => {
         setPlayerName(name);
         setIsAdmin(false);
+        saveSession({ playerName: name });
         socket.emit('join_room', { roomId: code.toUpperCase(), playerName: name });
       }}
     />

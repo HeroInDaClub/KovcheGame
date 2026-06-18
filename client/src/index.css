@@ -20,3 +20,37 @@
     background-size: 40px 40px;
   }
 }
+
+/* ── Фон страницы по теме ───────────────────────────────── */
+body { background: #0a0f1e; }
+html[data-theme="light"] body { background: #eef2f8; }
+
+/* ── СТИЛЬ: Минимализм — убираем свечения/тени/анимации/сетку ── */
+html[data-style="minimal"] *,
+html[data-style="minimal"] *::before,
+html[data-style="minimal"] *::after {
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+html[data-style="minimal"] .animate-pulse-neon { animation: none !important; }
+html[data-style="minimal"] .cyber-grid { background-image: none !important; }
+html[data-style="minimal"] [class*="drop-shadow"] { filter: none !important; }
+html[data-style="minimal"] .backdrop-blur-sm { backdrop-filter: none !important; }
+
+/* ── ТЕМА: Светлая — спокойная пастельная палитра ────────── */
+html[data-theme="light"] .bg-cyber-dark    { background-color: #eef2f8 !important; }
+html[data-theme="light"] .bg-cyber-panel   { background-color: #ffffff !important; }
+html[data-theme="light"] .bg-cyber-black   { background-color: #e7ecf5 !important; }
+html[data-theme="light"] .text-cyber-text  { color: #1f2a44 !important; }
+html[data-theme="light"] .text-cyber-muted { color: #5d6c87 !important; }
+html[data-theme="light"] .border-cyber-border { border-color: #d2d9e8 !important; }
+html[data-theme="light"] .text-cyber-neon   { color: #0a9d6e !important; }
+html[data-theme="light"] .text-cyber-blue   { color: #0077c2 !important; }
+html[data-theme="light"] .text-cyber-purple { color: #7b2ff7 !important; }
+html[data-theme="light"] .text-cyber-yellow { color: #b07d00 !important; }
+html[data-theme="light"] .text-cyber-red    { color: #d6336c !important; }
+html[data-theme="light"] .cyber-grid {
+  background-image:
+    linear-gradient(rgba(0, 80, 160, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 80, 160, 0.06) 1px, transparent 1px) !important;
+}
