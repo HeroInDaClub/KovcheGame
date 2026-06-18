@@ -1556,6 +1556,7 @@ function addCustomTask(data) {
     question_ru:         data.question_ru,
     correct_answer:      data.correct_answer,
     isCustom:            true,
+    ownerId:             data.ownerId || null,   // владелец (учитель) — защита от IDOR
     ...(data.options       && { options: data.options }),
     ...(data.code_snippet  && { code_snippet: data.code_snippet }),
     ...(data.image_url     && { image_url: data.image_url }),
@@ -1566,12 +1567,16 @@ function addCustomTask(data) {
   return task;
 }
 
-function removeCustomTask(id) {
-  const idx = TASKS.findIndex(t => t.id === id && t.isCustom);
-  if (idx === -1) return false;
-  TASKS.splice(idx, 1);
+// Удаление с проверкой владельца (IDOR-защита).
+// force=true — суперпользователь (может удалять любые кастомные задачи).
+// Возвращает { ok } | { error: 'NOT_FOUND' | 'FORBIDDEN' }.
+function removeCustomTask(id, requesterId, force = false) {
+  const task = TASKS.find(t => t.id === id && t.isCustom);
+  if (!task) return { error: 'NOT_FOUND' };
+  if (!force && task.ownerId !== requesterId) return { error: 'FORBIDDEN' };
+  TASKS.splice(TASKS.indexOf(task), 1);
   _saveCustom();
-  return true;
+  return { ok: true };
 }
 
 module.exports = { TASKS, addCustomTask, removeCustomTask };

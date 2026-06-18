@@ -344,6 +344,7 @@ function registerHandlers(io, socket) {
       level: Number(level), type, category,
       question_ru: question_ru.trim(),
       correct_answer: correct_answer.trim(),
+      ownerId: socket.data.username,           // фиксируем автора задачи
       options, code_snippet, lore_description_ru,
     });
 
@@ -354,9 +355,11 @@ function registerHandlers(io, socket) {
 
   socket.on('admin_delete_task', ({ id } = {}) => {
     if (!requireAdmin()) return;
-    const ok = removeCustomTask(id);
-    if (!ok) return socket.emit('error', { message_ru: 'Задача не найдена или не является пользовательской', code: 'TASK_NOT_FOUND' });
-    log(`Удалена пользовательская задача #${id}`);
+    const requesterId = socket.data.username;
+    const res = removeCustomTask(id, requesterId, requesterId === SUPERUSER);
+    if (res.error === 'NOT_FOUND')  return socket.emit('error', { message_ru: 'Задача не найдена или не является пользовательской', code: 'TASK_NOT_FOUND' });
+    if (res.error === 'FORBIDDEN')  return socket.emit('error', { message_ru: 'Доступ запрещён: можно удалять только свои задачи', code: 'FORBIDDEN' });
+    log(`Учитель "${requesterId}" удалил пользовательскую задачу #${id}`);
     socket.emit('custom_tasks_list', { tasks: TASKS.filter(t => t.isCustom) });
   });
 
