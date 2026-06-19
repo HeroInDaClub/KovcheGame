@@ -12,7 +12,10 @@ const { TASKS, addCustomTask, removeCustomTask } = require('./taskDatabase');
 // Сессии переподключения: Map<sessionToken, {...}>. Память сервера (сброс при
 // рестарте). При disconnect игрок не удаляется сразу — действует grace-период.
 const sessions = new Map();
-const GRACE_MS = 45 * 1000;
+// Grace-период до окончательного удаления offline-сессии. Увеличен со 45с:
+// при коротких обрывах/засыпании вкладки сессия (и привязка комнаты у учителя)
+// должна пережить переподключение, иначе start_game ловит «комната не найдена».
+const GRACE_MS = 2 * 60 * 1000;
 
 // Запросы на вступление в команду: Map<roomId, Array<{fromUserId, fromName, teamName}>>
 const joinRequests = new Map();
@@ -417,9 +420,12 @@ function registerHandlers(io, socket) {
           scores,
         });
       }
-
-      io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
     }
+
+    // Рассылаем room_state ПОСЛЕ ЛЮБОГО ответа: при провале MC сервер очищает
+    // activeTaskId (задача заблокирована) — без этого клиент не закрывает модалку.
+    // Также синхронизирует attempts/статусы задач в сетке у всей команды.
+    io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
   });
 
   // ── ABANDON TASK ─────────────────────────────────────────
