@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Users, Shield, Zap, Crown, Plus, UserX, Trash2, LogIn, User, Clock, ListChecks } from 'lucide-react';
 
 const DURATIONS = [15, 30, 45, 60, 90];   // минуты
@@ -7,6 +7,7 @@ export default function Lobby({
   roomState, roomId, playerName, isAdmin, notification,
   onSelectTeam, onCreateTeam, onKickMember, onDeleteTeam, onStartGame,
   onOpenProfile, onViewPlayer, onOpenTaskPool, myUserId,
+  teamError, onClearTeamError,
 }) {
   const allTeams     = Object.values(roomState.teams);
   const totalPlayers = allTeams.reduce((s, t) => s + t.members.length, 0);
@@ -22,10 +23,14 @@ export default function Lobby({
   const submitCreate = () => {
     const n = newName.trim();
     if (!n) return;
-    onCreateTeam(n);
-    setNewName('');
-    setCreating(false);
+    onCreateTeam(n);   // форму закроет успех (effect ниже), иначе покажется ошибка под инпутом
   };
+
+  // Закрываем форму создания только когда сервер реально создал команду
+  // (моя команда сменилась). При ошибке валидации форма остаётся открытой.
+  useEffect(() => {
+    if (myTeam) { setCreating(false); setNewName(''); }
+  }, [myTeam?.teamName]); // eslint-disable-line
 
   return (
     <div className="min-h-screen bg-cyber-dark cyber-grid flex flex-col font-mono">
@@ -72,25 +77,31 @@ export default function Lobby({
           </div>
           {canCreate && !isAdmin && (
             creating ? (
-              <div className="flex items-center gap-2">
-                <input
-                  autoFocus
-                  value={newName}
-                  maxLength={24}
-                  onChange={e => setNewName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && submitCreate()}
-                  placeholder="Название команды"
-                  className="bg-cyber-dark border border-cyber-neon text-cyber-text px-3 py-1.5 text-xs focus:outline-none w-44"
-                />
-                <button onClick={submitCreate} disabled={!newName.trim()}
-                  className="px-3 py-1.5 bg-cyber-neon text-black text-xs font-bold tracking-widest hover:opacity-90 disabled:opacity-30">
-                  СОЗДАТЬ
-                </button>
-                <button onClick={() => { setCreating(false); setNewName(''); }}
-                  className="text-cyber-muted text-xs hover:text-cyber-text">✕</button>
+              <div className="flex flex-col gap-1 items-start">
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    value={newName}
+                    maxLength={20}
+                    onChange={e => { setNewName(e.target.value); if (teamError) onClearTeamError?.(); }}
+                    onKeyDown={e => e.key === 'Enter' && submitCreate()}
+                    placeholder="Название команды"
+                    className={`bg-cyber-dark border text-cyber-text px-3 py-1.5 text-xs focus:outline-none w-44
+                      ${teamError ? 'border-cyber-red' : 'border-cyber-neon'}`}
+                  />
+                  <button onClick={submitCreate} disabled={!newName.trim()}
+                    className="px-3 py-1.5 bg-cyber-neon text-black text-xs font-bold tracking-widest hover:opacity-90 disabled:opacity-30">
+                    СОЗДАТЬ
+                  </button>
+                  <button onClick={() => { setCreating(false); setNewName(''); onClearTeamError?.(); }}
+                    className="text-cyber-muted text-xs hover:text-cyber-text">✕</button>
+                </div>
+                {/* Ошибка валидации с сервера — прямо под инпутом */}
+                {teamError && <div className="text-cyber-red text-[10px] max-w-[260px]">⚠ {teamError}</div>}
+                <div className="text-cyber-muted text-[9px]">2–20 символов · буквы, цифры, пробелы</div>
               </div>
             ) : (
-              <button onClick={() => setCreating(true)}
+              <button onClick={() => { setCreating(true); onClearTeamError?.(); }}
                 className="flex items-center gap-1.5 px-4 py-2 border border-cyber-neon text-cyber-neon text-xs font-bold tracking-widest hover:bg-cyber-neon hover:text-black transition">
                 <Plus size={13} /> СОЗДАТЬ КОМАНДУ
               </button>

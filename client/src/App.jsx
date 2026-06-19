@@ -51,6 +51,9 @@ export default function App() {
   const [catalog,  setCatalog]  = useState([]);            // полный каталог задач
   const [poolSel,  setPoolSel]  = useState([]);            // рабочий выбор (id, строки)
 
+  // Ошибка валидации названия команды (показывается под инпутом)
+  const [teamError, setTeamError] = useState('');
+
   const notify = useCallback((msg, duration = 4000) => {
     setNotif(msg);
     setTimeout(() => setNotif(''), duration);
@@ -139,7 +142,9 @@ export default function App() {
       setView('ended');
     });
 
-    socket.on('error', ({ message_ru }) => {
+    socket.on('error', ({ message_ru, code }) => {
+      // Ошибки названия команды показываем под инпутом создания (не глобально).
+      if (code === 'TEAM_ERROR') { setTeamError(message_ru); return; }
       notify(`⚠️ ${message_ru}`, 5000);
     });
 
@@ -322,8 +327,10 @@ export default function App() {
         isAdmin={isAdmin}
         notification={notification}
         onSelectTeam={(teamName) => { saveSession({ teamName }); socket.emit('select_team', { teamName }); }}
-        onCreateTeam={(teamName) => { saveSession({ teamName }); socket.emit('create_team', { teamName }); }}
+        onCreateTeam={(teamName) => { setTeamError(''); saveSession({ teamName }); socket.emit('create_team', { teamName }); }}
         onKickMember={(targetId) => socket.emit('kick_member', { targetId })}
+        teamError={teamError}
+        onClearTeamError={() => setTeamError('')}
         onDeleteTeam={(teamName) => socket.emit('delete_team', { teamName })}
         onStartGame={(minutes)   => socket.emit('start_game', { durationMinutes: minutes })}
         onOpenProfile={openMyProfile}

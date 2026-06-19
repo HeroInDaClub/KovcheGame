@@ -5,6 +5,7 @@
 const path = require('path');
 const { Worker } = require('worker_threads');
 const { TASKS } = require('./taskDatabase');
+const { validateTeamName } = require('./teamNameFilter');
 
 const WORKER_PATH     = path.join(__dirname, 'codeRunner.worker.js');
 const CODE_TIMEOUT_MS = 1000;
@@ -250,9 +251,10 @@ function pickTeamColor(room) {
 
 // Создать команду с кастомным названием; создатель становится капитаном.
 function createTeam(room, socketId, playerName, rawName, userId = null) {
-  const teamName = (rawName || '').trim();
-  if (!teamName) return { error: 'Введите название команды' };
-  if (teamName.length > 24) return { error: 'Название слишком длинное (макс. 24 символа)' };
+  // Валидация + мат-фильтр названия (длина, допустимые символы, цензура).
+  const check = validateTeamName(rawName);
+  if (check.error) return { error: check.error };
+  const teamName = check.name;
   if (Object.keys(room.teams).some(n => n.toLowerCase() === teamName.toLowerCase())) {
     return { error: 'Команда с таким названием уже существует' };
   }
