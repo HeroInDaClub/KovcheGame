@@ -12,6 +12,10 @@ export default function MultipleChoicePanel({ task, result, isCaptain, onSubmit,
   const failed   = result?.correct === false;
   const answered = solved || failed;
   const picked   = result?.submittedAnswer;
+  // Правильный ответ берём из результата сервера (а не из task — он больше не
+  // присылает correct_answer клиенту): при провале — result.correctAnswer,
+  // при успехе — выбранный вариант и есть правильный.
+  const correctAns = solved ? picked : result?.correctAnswer;
 
   const letterFor = idx => String.fromCharCode(65 + idx);
 
@@ -47,7 +51,7 @@ export default function MultipleChoicePanel({ task, result, isCaptain, onSubmit,
         {/* 4 кнопки. ВАЖНО: disabled после ЛЮБОГО ответа */}
         <div className="space-y-2 pt-1">
           {task.options.map((opt, idx) => {
-            const isCorrect = answered && opt === task.correct_answer;
+            const isCorrect = answered && correctAns != null && opt === correctAns;
             const isWrong   = failed && picked && opt === picked;
             const disabled  = answered || !isCaptain;
 

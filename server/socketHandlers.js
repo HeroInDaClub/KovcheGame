@@ -551,8 +551,10 @@ function registerHandlers(io, socket) {
 
     room.taskPool = pool;
     touch(room);
-    log(`Учитель зафиксировал пул: ${pool.length} задач в комнате ${room.roomId}`);
-    socket.emit('task_pool_set', { count: pool.length });
+    // Сколько из 12 секторов покрыто: если <12 — победа «по секторам» недостижима.
+    const sectors = new Set(pool.map(t => t.sector)).size;
+    log(`Учитель зафиксировал пул: ${pool.length} задач (${sectors}/12 секторов) в комнате ${room.roomId}`);
+    socket.emit('task_pool_set', { count: pool.length, sectors });
     io.to(room.roomId).emit('room_state', gs.getPublicRoomState(room));
   });
 
@@ -851,9 +853,11 @@ function sanitizeImportedTask(raw) {
   if (Array.isArray(raw.keywords))        t.keywords        = raw.keywords.map(String);
   if (raw.image_url)                      t.image_url       = String(raw.image_url);
 
-  // Отсев заведомо непригодных задач.
+  // Отсев заведомо непригодных/нерешаемых задач.
   if (t.type === 'multiple_choice' && (!t.options || t.options.length < 2)) return null;
   if (['text_phrase', 'code_repair', 'multiple_choice'].includes(t.type) && !t.correct_answer) return null;
+  if (t.type === 'full_code' && (!t.entry || !Array.isArray(t.tests) || t.tests.length === 0)) return null;
+  if (t.type === 'interactive_match' && (!Array.isArray(t.pairs) || t.pairs.length < 2)) return null;
   return t;
 }
 

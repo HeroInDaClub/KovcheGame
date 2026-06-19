@@ -668,10 +668,23 @@ function getDifficultyPoints(level) {
   return level * 50;
 }
 
+// Проекция задачи БЕЗ полей, раскрывающих ответ (для отправки игрокам).
+// interactive_match: обе колонки оставляем, но «правые» перемешиваем — чтобы
+// в payload не было верного соответствия.
+function publicTask(t) {
+  const { correct_answer, acceptedAnswers, keywords, tests, pairs, ...safe } = t;
+  if (t.type === 'interactive_match' && Array.isArray(pairs)) {
+    const rights = shuffleArray(pairs.map(p => p.right));
+    safe.pairs = pairs.map((p, i) => ({ left: p.left, right: rights[i] }));
+  }
+  return safe;
+}
+
 function getPublicRoomState(room) {
-  // Strip timerInterval (non-serializable) before sending
-  const { timerInterval, ...publicRoom } = room;
-  return publicRoom;
+  // Убираем несериализуемый таймер и серверный каталог импорта; задачи отдаём
+  // БЕЗ ответов (publicTask) — иначе игроки видят правильные варианты в payload.
+  const { timerInterval, importedTasks, taskPool, ...publicRoom } = room;
+  return { ...publicRoom, taskPool: (taskPool || []).map(publicTask) };
 }
 
 function deleteRoom(roomId) {

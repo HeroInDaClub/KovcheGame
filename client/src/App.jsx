@@ -192,7 +192,12 @@ export default function App() {
       setPoolSel(prev => Array.from(new Set([...prev, ...(packIds || []).map(String)])));
       notify(`📦 Импортировано задач: ${total} (новых: ${added}). Отмечены — нажмите «Применить пул».`, 6000);
     });
-    socket.on('task_pool_set', ({ count }) => notify(`✓ Пул матча зафиксирован: ${count} задач`, 4000));
+    socket.on('task_pool_set', ({ count, sectors }) => {
+      const warn = (sectors != null && sectors < 12)
+        ? ` ⚠️ Покрыто ${sectors}/12 секторов — победа «по секторам» невозможна (только по таймеру).`
+        : '';
+      notify(`✓ Пул зафиксирован: ${count} задач.${warn}`, warn ? 7000 : 4000);
+    });
 
     return () => {
       disconnect();
