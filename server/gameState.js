@@ -1,5 +1,5 @@
 // ============================================================
-// Aegis-X: Cyber-Siege — In-Memory Game State Manager
+// Спасение Ковчега — In-Memory Game State Manager
 // ============================================================
 
 const path = require('path');

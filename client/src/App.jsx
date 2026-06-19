@@ -411,7 +411,7 @@ function EntryScreen({ onAdmin, onRegister, onPlayer, notification }) {
 
       <div className="mb-8 text-center">
         <div className="text-4xl font-bold text-cyber-neon text-shadow-neon tracking-widest mb-2">
-          AEGIS-X
+          Спасение Ковчега
         </div>
         <div className="text-cyber-blue text-sm tracking-[0.3em] uppercase">
           Кибер-Осада Межзвёздного Ковчега

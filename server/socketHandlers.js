@@ -1,5 +1,5 @@
 // ============================================================
-// Aegis-X: Cyber-Siege — Socket.io Event Handlers
+// Спасение Ковчега — Socket.io Event Handlers
 // ============================================================
 
 const crypto = require('crypto');

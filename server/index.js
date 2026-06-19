@@ -1,5 +1,5 @@
 // ============================================================
-// Aegis-X: Cyber-Siege — Main Server Entry Point
+// Спасение Ковчега — Main Server Entry Point
 // Port: 3001  |  CORS: localhost:5173 (Vite dev) + production
 // ============================================================
 
@@ -49,7 +49,7 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {
   console.log(`\n╔══════════════════════════════════════╗`);
-  console.log(`║   Aegis-X: Cyber-Siege — СЕРВЕР     ║`);
+  console.log(`║   Спасение Ковчега — СЕРВЕР         ║`);
   console.log(`║   Порт: ${PORT}                         ║`);
   console.log(`╚══════════════════════════════════════╝\n`);
   startRoomReaper(io);   // фоновая очистка мёртвых комнат
