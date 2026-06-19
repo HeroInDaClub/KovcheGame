@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { Users, Shield, Zap, Crown, Plus, UserX, Trash2, LogIn, User, Clock } from 'lucide-react';
+import { Users, Shield, Zap, Crown, Plus, UserX, Trash2, LogIn, User, Clock, ListChecks } from 'lucide-react';
 
 const DURATIONS = [15, 30, 45, 60, 90];   // минуты
 
 export default function Lobby({
   roomState, roomId, playerName, isAdmin, notification,
   onSelectTeam, onCreateTeam, onKickMember, onDeleteTeam, onStartGame,
-  onOpenProfile, onViewPlayer, myUserId,
+  onOpenProfile, onViewPlayer, onOpenTaskPool, myUserId,
 }) {
   const allTeams     = Object.values(roomState.teams);
   const totalPlayers = allTeams.reduce((s, t) => s + t.members.length, 0);
@@ -207,6 +207,10 @@ export default function Lobby({
 
         {isAdmin && (
           <div className="flex flex-col gap-3">
+            <button onClick={onOpenTaskPool}
+              className="flex items-center justify-center gap-2 py-2.5 border border-cyber-purple text-cyber-purple text-sm font-bold tracking-widest hover:bg-cyber-purple hover:text-black transition">
+              <ListChecks size={15} /> ПУЛ ЗАДАЧ ({roomState.taskPool?.length ?? 0}) · ЭКСПОРТ/ИМПОРТ ПАКА
+            </button>
             <div className="flex items-center gap-2 flex-wrap text-xs">
               <Clock size={14} className="text-cyber-purple" />
               <span className="text-cyber-muted tracking-widest">ДЛИТЕЛЬНОСТЬ:</span>

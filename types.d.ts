@@ -131,6 +131,25 @@ export interface SocialContext {
 //   social_ack { message_ru }
 //   game_ended.reason: 'timeout' | 'all_sectors' | 'forced'
 
+// ── Task Pool & Packs (Teacher) ────────────────────────────
+// Каталог = глобальные TASKS + room.importedTasks (импортированные в комнату).
+// room.taskPool — зафиксированный учителем набор задач матча (источник истины).
+export interface TaskPack {
+  format:     'aegis-task-pack';
+  version:    number;
+  createdAt?: string;
+  count?:     number;
+  tasks:      Task[];          // полные структуры задач (самодостаточный пак)
+}
+// Client→Server:
+//   admin_get_all_tasks
+//   admin_set_task_pool { taskIds: string[] }
+//   admin_import_pack { tasks: Task[] }
+// Server→Client:
+//   all_tasks_list { tasks: Task[], poolIds: string[] }
+//   task_pool_set { count: number }
+//   pack_imported { packIds: string[], added: number, total: number }
+
 export interface TeamState {
   teamName:     string;
   color:        string;

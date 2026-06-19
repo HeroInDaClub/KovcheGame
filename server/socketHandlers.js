@@ -507,6 +507,82 @@ function registerHandlers(io, socket) {
     socket.emit('custom_tasks_list', { tasks: TASKS.filter(t => t.isCustom) });
   });
 
+  // ── TASK POOL MANAGEMENT (Teacher, перед стартом) ────────
+  // Каталог = глобальные TASKS + задачи, импортированные в эту комнату.
+  const taskCatalog = (room) => TASKS.concat(room.importedTasks || []);
+
+  // Полный список задач для выбора + текущий зафиксированный пул комнаты.
+  socket.on('admin_get_all_tasks', () => {
+    if (!requireAdmin()) return;
+    const room = gs.getRoom(socket.data.roomId);
+    if (!room) return socket.emit('error', { message_ru: 'Сначала создайте комнату', code: 'ROOM_NOT_FOUND' });
+    socket.emit('all_tasks_list', {
+      tasks:   taskCatalog(room),
+      poolIds: room.taskPool.map(t => String(t.id)),
+    });
+  });
+
+  // Зафиксировать пул матча выбранными задачами (источник истины — комната).
+  socket.on('admin_set_task_pool', ({ taskIds } = {}) => {
+    if (!requireAdmin()) return;
+    const room = gs.getRoom(socket.data.roomId);
+    if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
+    if (room.phase !== 'lobby') return socket.emit('error', { message_ru: 'Менять пул можно только в лобби', code: 'NOT_LOBBY' });
+    if (!Array.isArray(taskIds) || taskIds.length === 0)
+      return socket.emit('error', { message_ru: 'Выберите хотя бы одну задачу', code: 'EMPTY_POOL' });
+
+    const byId = new Map(taskCatalog(room).map(t => [String(t.id), t]));
+    const seen = new Set();
+    const pool = [];
+    for (const id of taskIds) {
+      const key = String(id);
+      if (seen.has(key)) continue;
+      const t = byId.get(key);
+      if (t) { pool.push(t); seen.add(key); }
+    }
+    if (pool.length === 0)
+      return socket.emit('error', { message_ru: 'Ни одна из выбранных задач не найдена', code: 'EMPTY_POOL' });
+
+    room.taskPool = pool;
+    touch(room);
+    log(`Учитель зафиксировал пул: ${pool.length} задач в комнате ${room.roomId}`);
+    socket.emit('task_pool_set', { count: pool.length });
+    io.to(room.roomId).emit('room_state', gs.getPublicRoomState(room));
+  });
+
+  // Импорт пака: уже известные id — отметить; новые задачи — добавить в каталог комнаты.
+  socket.on('admin_import_pack', ({ tasks } = {}) => {
+    if (!requireAdmin()) return;
+    const room = gs.getRoom(socket.data.roomId);
+    if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
+    if (room.phase !== 'lobby') return socket.emit('error', { message_ru: 'Импорт доступен только в лобби', code: 'NOT_LOBBY' });
+    if (!Array.isArray(tasks) || tasks.length === 0)
+      return socket.emit('error', { message_ru: 'Файл не содержит задач', code: 'BAD_PACK' });
+
+    if (!room.importedTasks) room.importedTasks = [];
+    const known = new Set(taskCatalog(room).map(t => String(t.id)));
+    const packIds = [];
+    let added = 0;
+    for (const raw of tasks) {
+      const id = raw && raw.id != null ? String(raw.id) : null;
+      if (id && known.has(id)) { packIds.push(id); continue; }   // уже в каталоге — просто отметим
+      const t = sanitizeImportedTask(raw);
+      if (!t) continue;
+      room.importedTasks.push(t);
+      known.add(t.id);
+      packIds.push(t.id);
+      added++;
+    }
+    if (packIds.length === 0)
+      return socket.emit('error', { message_ru: 'В паке нет корректных задач', code: 'BAD_PACK' });
+
+    touch(room);
+    log(`Импорт пака: ${packIds.length} задач (новых кастомных: ${added}) в ${room.roomId}`);
+    socket.emit('all_tasks_list', { tasks: taskCatalog(room), poolIds: room.taskPool.map(t => String(t.id)) });
+    socket.emit('pack_imported', { packIds, added, total: packIds.length });
+    io.to(room.roomId).emit('room_state', gs.getPublicRoomState(room));
+  });
+
   // ── USER PROFILES & SOCIAL (Игроки) ──────────────────────
 
   // Кому сейчас принадлежит сокет с данным userId (для адресной доставки).
@@ -731,6 +807,48 @@ function registerHandlers(io, socket) {
     log(`Игрок "${session.playerName || 'учитель'}" отключился — grace ${GRACE_MS / 1000}с`);
     session.timeoutId = setTimeout(() => finalizeSession(token), GRACE_MS);
   });
+}
+
+// Нормализация задачи из импортированного пака (защита от мусора в файле).
+const PACK_VALID_TYPES = ['text_phrase', 'multiple_choice', 'code_repair', 'full_code', 'interactive_match'];
+const PACK_VALID_CATS  = ['logic_crypto', 'cs_theory', 'programming'];
+
+function sanitizeImportedTask(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const type = PACK_VALID_TYPES.includes(raw.type) ? raw.type : 'text_phrase';
+  const question_ru = (raw.question_ru || '').toString().trim();
+  if (!question_ru) return null;
+
+  const level    = Math.max(1, Math.min(5,  parseInt(raw.level)  || 1));
+  const sector   = Math.max(1, Math.min(12, parseInt(raw.sector) || level));
+  const category = PACK_VALID_CATS.includes(raw.category) ? raw.category
+                 : type === 'multiple_choice' ? 'cs_theory'
+                 : (type === 'code_repair' || type === 'full_code') ? 'programming'
+                 : 'logic_crypto';
+
+  const t = {
+    id:                 String(raw.id != null ? raw.id : `imp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`),
+    level, sector, type, category,
+    question_ru,
+    correct_answer:     raw.correct_answer != null ? String(raw.correct_answer) : '',
+    lore_description_ru: (raw.lore_description_ru || '').toString(),
+    isCustom: true,
+    imported: true,
+  };
+  if (Array.isArray(raw.options))         t.options         = raw.options.map(String);
+  if (raw.code_snippet)                   t.code_snippet    = String(raw.code_snippet);
+  if (raw.language)                       t.language        = String(raw.language);
+  if (raw.entry)                          t.entry           = String(raw.entry);
+  if (Array.isArray(raw.tests))           t.tests           = raw.tests;
+  if (Array.isArray(raw.pairs))           t.pairs           = raw.pairs;
+  if (Array.isArray(raw.acceptedAnswers)) t.acceptedAnswers = raw.acceptedAnswers.map(String);
+  if (Array.isArray(raw.keywords))        t.keywords        = raw.keywords.map(String);
+  if (raw.image_url)                      t.image_url       = String(raw.image_url);
+
+  // Отсев заведомо непригодных задач.
+  if (t.type === 'multiple_choice' && (!t.options || t.options.length < 2)) return null;
+  if (['text_phrase', 'code_repair', 'multiple_choice'].includes(t.type) && !t.correct_answer) return null;
+  return t;
 }
 
 function buildFinalScores(room) {

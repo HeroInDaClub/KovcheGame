@@ -7,6 +7,7 @@ import TeacherDashboard from './components/TeacherDashboard.jsx';
 import GameOver         from './components/GameOver.jsx';
 import ProfilePanel       from './components/ProfilePanel.jsx';
 import PlayerProfileModal from './components/PlayerProfileModal.jsx';
+import TaskPoolManager    from './components/TaskPoolManager.jsx';
 import { getUserId }      from './profile.js';
 
 // ── App-level view states ────────────────────────────────
@@ -44,6 +45,11 @@ export default function App() {
   const [viewProfile, setViewProfile] = useState(null);   // { profile, context }
   const [invite,      setInvite]      = useState(null);    // входящий team_invite
   const [joinReqs,    setJoinReqs]    = useState([]);      // входящие запросы (капитан)
+
+  // ── Пул задач (учитель) ──
+  const [poolMgr,  setPoolMgr]  = useState(false);
+  const [catalog,  setCatalog]  = useState([]);            // полный каталог задач
+  const [poolSel,  setPoolSel]  = useState([]);            // рабочий выбор (id, строки)
 
   const notify = useCallback((msg, duration = 4000) => {
     setNotif(msg);
@@ -172,6 +178,17 @@ export default function App() {
       notify(`🙋 ${data.fromName} просится в «${data.teamName}»`, 6000);
     });
 
+    // ── Пул задач ──
+    socket.on('all_tasks_list', ({ tasks, poolIds }) => {
+      setCatalog(tasks);
+      setPoolSel((poolIds || []).map(String));
+    });
+    socket.on('pack_imported', ({ packIds, added, total }) => {
+      setPoolSel(prev => Array.from(new Set([...prev, ...(packIds || []).map(String)])));
+      notify(`📦 Импортировано задач: ${total} (новых: ${added}). Отмечены — нажмите «Применить пул».`, 6000);
+    });
+    socket.on('task_pool_set', ({ count }) => notify(`✓ Пул матча зафиксирован: ${count} задач`, 4000));
+
     return () => {
       disconnect();
       socket.removeAllListeners();
@@ -193,6 +210,54 @@ export default function App() {
 
   const openMyProfile = () => { socket.emit('get_my_profile'); setShowProfile(true); };
   const viewPlayer    = (userId) => userId && socket.emit('get_profile', { userId });
+
+  // ── Пул задач (учитель) ──
+  const openTaskPool = () => { socket.emit('admin_get_all_tasks'); setPoolMgr(true); };
+  const togglePool    = (id) => setPoolSel(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const setManyPool   = (ids, on) => setPoolSel(prev => {
+    const s = new Set(prev);
+    ids.forEach(i => on ? s.add(i) : s.delete(i));
+    return [...s];
+  });
+  const applyPool = () => { socket.emit('admin_set_task_pool', { taskIds: poolSel }); setPoolMgr(false); };
+
+  const importPackFile = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        const tasks = Array.isArray(data)            ? data
+                    : Array.isArray(data.tasks)      ? data.tasks
+                    : Array.isArray(data.taskIds)    ? data.taskIds.map(id => ({ id }))
+                    : null;
+        if (!tasks || tasks.length === 0) return notify('⚠️ Пустой или неверный файл пака', 4000);
+        socket.emit('admin_import_pack', { tasks });
+      } catch { notify('⚠️ Не удалось прочитать JSON', 4000); }
+    };
+    reader.readAsText(file);
+  };
+
+  const exportPack = () => {
+    const set = new Set(poolSel.map(String));
+    const tasks = catalog.filter(t => set.has(String(t.id)));
+    const pack = { format: 'aegis-task-pack', version: 1, createdAt: new Date().toISOString(), count: tasks.length, tasks };
+    const blob = new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `aegis-pack-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const taskPoolLayer = poolMgr ? (
+    <TaskPoolManager
+      catalog={catalog} selectedIds={poolSel}
+      onToggle={togglePool} onSetMany={setManyPool}
+      onApply={applyPool} onExport={exportPack} onImportFile={importPackFile}
+      onClose={() => setPoolMgr(false)}
+    />
+  ) : null;
 
   const socialLayer = (
     <SocialLayer
@@ -263,9 +328,11 @@ export default function App() {
         onStartGame={(minutes)   => socket.emit('start_game', { durationMinutes: minutes })}
         onOpenProfile={openMyProfile}
         onViewPlayer={viewPlayer}
+        onOpenTaskPool={openTaskPool}
         myUserId={myUserId}
       />
       {socialLayer}
+      {taskPoolLayer}
     </>);
   }
 
