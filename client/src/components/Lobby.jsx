@@ -138,8 +138,8 @@ export default function Lobby({
               >
                 {/* Name */}
                 <div className="flex items-center justify-between gap-2 min-w-0">
-                  <div className="text-xs font-bold tracking-widest flex items-center gap-1 min-w-0"
-                    style={{ color: isMine ? c : '#c8d8f0' }}>
+                  <div className={`text-xs font-bold tracking-widest flex items-center gap-1 min-w-0 ${isMine ? '' : 'text-cyber-text'}`}
+                    style={isMine ? { color: c } : undefined}>
                     {isMine && <Crown size={10} className="flex-shrink-0" />}
                     <span className="truncate" title={team.teamName}>{team.teamName.toUpperCase()}</span>
                   </div>
@@ -168,8 +168,8 @@ export default function Lobby({
                         <button
                           onClick={() => (isSelf && !isAdmin ? onOpenProfile() : onViewPlayer?.(m.userId))}
                           title="Открыть профиль"
-                          className="truncate text-left hover:underline"
-                          style={{ color: m.isCaptain ? c : '#a0b4c8' }}
+                          className={`truncate text-left hover:underline ${m.isCaptain ? '' : 'text-cyber-muted'}`}
+                          style={m.isCaptain ? { color: c } : undefined}
                         >{m.name}</button>
                         {canKick && (
                           <button onClick={() => onKickMember(m.id)}
