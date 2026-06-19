@@ -338,7 +338,7 @@ export default function App() {
         teamError={teamError}
         onClearTeamError={() => setTeamError('')}
         onDeleteTeam={(teamName) => socket.emit('delete_team', { teamName })}
-        onStartGame={(minutes)   => socket.emit('start_game', { durationMinutes: minutes })}
+        onStartGame={(opts)      => socket.emit('start_game', opts)}
         onOpenProfile={openMyProfile}
         onViewPlayer={viewPlayer}
         onOpenTaskPool={openTaskPool}

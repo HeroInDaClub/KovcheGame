@@ -31,6 +31,11 @@ export default function Dashboard({
     ? myTeam.members.find(m => m.name === playerName)?.isCaptain
     : false;
 
+  // Режим игры: в «Отборочном» карта индивидуальна — показываем корабль своей
+  // команды; в «Финале» — общую карту.
+  const qualification = roomState.gameMode === 'qualification';
+  const myMap = qualification ? (myTeam?.mapSectors || roomState.mapSectors) : roomState.mapSectors;
+
   // Активная задача выводится напрямую из room_state: пока у команды задан
   // activeTaskId — модалка открыта; сервер очищает его → модалка закрывается.
   const activeTask = useMemo(() => {
@@ -74,6 +79,10 @@ export default function Dashboard({
         <div className="flex items-center gap-3">
           <span className="text-cyber-neon font-bold tracking-widest">Спасение Ковчега</span>
           <span className="text-cyber-muted text-xs hidden sm:block">// КИБЕР-ОСАДА</span>
+          <span className={`text-[10px] px-2 py-px border tracking-widest hidden sm:block
+            ${qualification ? 'border-cyber-blue text-cyber-blue' : 'border-cyber-purple text-cyber-purple'}`}>
+            {qualification ? 'ОТБОРОЧНЫЙ' : 'ФИНАЛ'}
+          </span>
         </div>
 
         {/* Timer */}
@@ -119,11 +128,14 @@ export default function Dashboard({
         {/* Left: Ship Map + Leaderboard */}
         <aside className="w-64 flex-shrink-0 border-r border-cyber-border bg-cyber-panel flex flex-col overflow-y-auto hidden lg:flex">
           <div className="p-4">
-            <div className="text-cyber-blue text-[10px] tracking-widest mb-3">// КАРТА КОВЧЕГА</div>
-            <ShipMap mapSectors={roomState.mapSectors} teams={roomState.teams} />
+            <div className="text-cyber-blue text-[10px] tracking-widest mb-3">
+              {qualification ? `// ВАШ КОРАБЛЬ${myTeam ? ` · ${myTeam.teamName.toUpperCase()}` : ''}` : '// КАРТА КОВЧЕГА'}
+            </div>
+            <ShipMap mapSectors={myMap} teams={roomState.teams} />
           </div>
           <div className="p-4 border-t border-cyber-border">
-            <Leaderboard teams={roomState.teams} mapSectors={roomState.mapSectors} />
+            <Leaderboard teams={roomState.teams} mapSectors={roomState.mapSectors}
+              gameMode={roomState.gameMode} focusTeam={myTeam?.teamName} />
           </div>
         </aside>
 

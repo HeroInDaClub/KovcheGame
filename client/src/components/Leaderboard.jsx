@@ -1,14 +1,25 @@
 import { Trophy, Users, Target } from 'lucide-react';
 
-export default function Leaderboard({ teams, mapSectors }) {
+export default function Leaderboard({ teams, mapSectors, gameMode = 'finals', focusTeam }) {
+  const qualification = gameMode === 'qualification';
+  const TOTAL = mapSectors.length || 12;
+
+  // Захвачено секторов: в «Отборочном» — из собственной карты команды,
+  // в «Финале» — из общей карты по владельцу.
+  const capturedOf = (t) => qualification
+    ? (t.mapSectors || []).filter(s => s.capturedBy).length
+    : mapSectors.filter(s => s.capturedBy === t.teamName).length;
+
   const ranked = Object.values(teams)
     .filter(t => t.members.length > 0)   // только команды с игроками
     .map(t => ({
       ...t,
-      captured: mapSectors.filter(s => s.capturedBy === t.teamName).length,
+      captured: capturedOf(t),
       solved:   Object.values(t.taskStatuses).filter(s => s.status === 'solved').length,
     }))
     .sort((a, b) => b.score - a.score);
+
+  const focus = ranked.find(t => t.teamName === focusTeam);
 
   return (
     <div className="bg-cyber-panel border border-cyber-border p-4 font-mono">
@@ -59,25 +70,39 @@ export default function Leaderboard({ teams, mapSectors }) {
 
       {/* Sector progress bar */}
       <div className="mt-4 pt-3 border-t border-cyber-border">
-        <div className="text-[10px] text-cyber-muted mb-2 tracking-widest">ЗАХВАТ СЕКТОРОВ</div>
-        <div className="flex h-2 rounded overflow-hidden bg-cyber-dark">
-          {ranked.filter(t => t.captured > 0).map(t => (
-            <div
-              key={t.teamName}
-              style={{
-                width: `${(t.captured / mapSectors.length) * 100}%`,
-                background: t.color,
-                opacity: 0.85,
-              }}
-              title={`${t.teamName}: ${t.captured}`}
-            />
-          ))}
-        </div>
-        <div className="flex justify-between text-[9px] text-cyber-muted mt-1">
-          <span>0</span>
-          <span>{mapSectors.filter(s => s.capturedBy).length} / {mapSectors.length} захвачено</span>
-          <span>{mapSectors.length}</span>
-        </div>
+        {qualification ? (
+          // Отборочный: прогресс собственного корабля игрока
+          <>
+            <div className="text-[10px] text-cyber-muted mb-2 tracking-widest">ВАШ КОРАБЛЬ</div>
+            <div className="flex h-2 rounded overflow-hidden bg-cyber-dark">
+              {focus && focus.captured > 0 && (
+                <div style={{ width: `${(focus.captured / TOTAL) * 100}%`, background: focus.color, opacity: 0.85 }} />
+              )}
+            </div>
+            <div className="flex justify-between text-[9px] text-cyber-muted mt-1">
+              <span>0</span>
+              <span>{focus ? focus.captured : 0} / {TOTAL} зачищено</span>
+              <span>{TOTAL}</span>
+            </div>
+          </>
+        ) : (
+          // Финал: общая карта, доли команд
+          <>
+            <div className="text-[10px] text-cyber-muted mb-2 tracking-widest">ЗАХВАТ СЕКТОРОВ</div>
+            <div className="flex h-2 rounded overflow-hidden bg-cyber-dark">
+              {ranked.filter(t => t.captured > 0).map(t => (
+                <div key={t.teamName}
+                  style={{ width: `${(t.captured / TOTAL) * 100}%`, background: t.color, opacity: 0.85 }}
+                  title={`${t.teamName}: ${t.captured}`} />
+              ))}
+            </div>
+            <div className="flex justify-between text-[9px] text-cyber-muted mt-1">
+              <span>0</span>
+              <span>{mapSectors.filter(s => s.capturedBy).length} / {TOTAL} захвачено</span>
+              <span>{TOTAL}</span>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
