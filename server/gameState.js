@@ -249,7 +249,7 @@ function pickTeamColor(room) {
 }
 
 // Создать команду с кастомным названием; создатель становится капитаном.
-function createTeam(room, socketId, playerName, rawName) {
+function createTeam(room, socketId, playerName, rawName, userId = null) {
   const teamName = (rawName || '').trim();
   if (!teamName) return { error: 'Введите название команды' };
   if (teamName.length > 24) return { error: 'Название слишком длинное (макс. 24 символа)' };
@@ -263,7 +263,7 @@ function createTeam(room, socketId, playerName, rawName) {
   detachPlayer(room, socketId);
 
   const { color, glow } = pickTeamColor(room);
-  const player = { id: socketId, name: playerName, teamName, isCaptain: true };
+  const player = { id: socketId, name: playerName, teamName, isCaptain: true, userId };
   room.teams[teamName] = {
     teamName, color, glow, score: 0,
     captainId: socketId, members: [player],
@@ -274,14 +274,14 @@ function createTeam(room, socketId, playerName, rawName) {
 }
 
 // Войти в существующую команду; первый вошедший — капитан.
-function selectTeam(room, socketId, playerName, teamName) {
+function selectTeam(room, socketId, playerName, teamName, userId = null) {
   const team = room.teams[teamName];
   if (!team) return { error: 'Команда не найдена' };
 
   detachPlayer(room, socketId);
 
   const isCaptain = team.members.length === 0;
-  const player = { id: socketId, name: playerName, teamName, isCaptain };
+  const player = { id: socketId, name: playerName, teamName, isCaptain, userId };
   team.members.push(player);
   if (isCaptain) team.captainId = socketId;
 
@@ -350,6 +350,16 @@ function removePlayer(socketId) {
 function getPlayerTeam(room, socketId) {
   for (const team of Object.values(room.teams)) {
     const member = team.members.find(m => m.id === socketId);
+    if (member) return { team, player: member };
+  }
+  return null;
+}
+
+// Найти участника по стабильному userId (для соц-функций: инвайты, запросы).
+function findMemberByUserId(room, userId) {
+  if (!userId) return null;
+  for (const team of Object.values(room.teams)) {
+    const member = team.members.find(m => m.userId === userId);
     if (member) return { team, player: member };
   }
   return null;
@@ -719,6 +729,7 @@ module.exports = {
   setMemberOffline,
   removePlayer,
   getPlayerTeam,
+  findMemberByUserId,
   pickTask,
   submitAnswer,
   abandonTask,

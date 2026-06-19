@@ -3,3 +3,6 @@ dist/
 .env
 .env.local
 *.log
+
+# user profiles (PII) — не коммитим
+server/users.json

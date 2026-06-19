@@ -78,7 +78,58 @@ export interface Player {
   name:      string;
   teamName:  string;
   isCaptain: boolean;
+  userId?:   string | null;   // стабильный id игрока (профиль/друзья/инвайты)
+  offline?:  boolean;
 }
+
+// ── User Profiles & Social ─────────────────────────────────
+// Профили персистятся на диск (users.json) и переживают рестарт.
+export interface ContactSet { email: string; vk: string; github: string; }
+export interface PrivacyFlags { email: boolean; vk: boolean; github: boolean; }  // true = публично
+export interface FriendCard  { id: string; name: string; missing?: boolean; }
+
+// Полный профиль владельца (раздел «Мой профиль»).
+export interface OwnProfile {
+  id:       string;
+  name:     string;
+  contacts: ContactSet;
+  privacy:  PrivacyFlags;
+  friends:  FriendCard[];
+  self:     true;
+}
+
+// Публичный профиль чужого игрока — только контакты с флагом public.
+export interface PublicProfile {
+  id:          string;
+  name:        string;
+  contacts:    Partial<ContactSet>;
+  friends:     FriendCard[];
+  friendCount: number;
+  isFriend:    boolean;
+  self:        boolean;
+}
+
+// Соц-контекст цели в комнате наблюдателя (для кнопок инвайта/запроса; только лобби).
+export interface SocialContext {
+  sameRoom:     boolean;
+  online:       boolean;
+  targetTeam:   string | null;
+  iAmCaptainOf: string | null;
+}
+
+// Client→Server:
+//   join_room { roomId, playerName, userId }
+//   get_my_profile | update_profile { name?, contacts?, privacy? }
+//   get_profile { userId } | add_friend { userId } | remove_friend { userId }
+//   team_invite { userId } | team_join_request { userId } | approve_join { userId, accept }
+//   start_game { durationMinutes? } | admin_force_end_game
+// Server→Client:
+//   my_profile { profile: OwnProfile }
+//   profile_view { profile: PublicProfile, context: SocialContext }
+//   team_invite_received { teamName, color, fromName }
+//   join_request_received { fromUserId, fromName, teamName }
+//   social_ack { message_ru }
+//   game_ended.reason: 'timeout' | 'all_sectors' | 'forced'
 
 export interface TeamState {
   teamName:     string;

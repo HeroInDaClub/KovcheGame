@@ -5,6 +5,7 @@
 const crypto = require('crypto');
 const gs = require('./gameState');
 const mh = require('./matchHistory');
+const up = require('./userProfiles');
 const { TASKS, addCustomTask, removeCustomTask } = require('./taskDatabase');
 
 // ── Session Resiliency ───────────────────────────────────
@@ -12,6 +13,9 @@ const { TASKS, addCustomTask, removeCustomTask } = require('./taskDatabase');
 // рестарте). При disconnect игрок не удаляется сразу — действует grace-период.
 const sessions = new Map();
 const GRACE_MS = 45 * 1000;
+
+// Запросы на вступление в команду: Map<roomId, Array<{fromUserId, fromName, teamName}>>
+const joinRequests = new Map();
 
 const sessionBySocket = (sid) => {
   for (const s of sessions.values()) if (s.socketId === sid) return s;
@@ -54,6 +58,7 @@ function registerHandlers(io, socket) {
       session = {
         roomId: null, playerName: null, teamName: null,
         isCaptain: false, isAdmin: false, username: null,
+        userId: null,
         socketId: socket.id, offline: false, timeoutId: null,
       };
       sessions.set(token, session);
@@ -170,7 +175,7 @@ function registerHandlers(io, socket) {
   });
 
   // ── JOIN ROOM ────────────────────────────────────────────
-  socket.on('join_room', ({ roomId, playerName } = {}) => {
+  socket.on('join_room', ({ roomId, playerName, userId } = {}) => {
     if (!roomId?.trim() || !playerName?.trim()) {
       return socket.emit('error', { message_ru: 'Укажите код комнаты и имя', code: 'MISSING_FIELDS' });
     }
@@ -181,7 +186,9 @@ function registerHandlers(io, socket) {
     socket.join(roomId.toUpperCase().trim());
     socket.data.playerName = playerName.trim();
     socket.data.roomId = roomId.toUpperCase().trim();
-    ensureSession({ roomId: socket.data.roomId, playerName: socket.data.playerName, isAdmin: !!socket.data.isAdmin });
+    socket.data.userId = userId || null;
+    if (socket.data.userId) up.ensureUser(socket.data.userId, socket.data.playerName);  // профиль игрока
+    ensureSession({ roomId: socket.data.roomId, playerName: socket.data.playerName, isAdmin: !!socket.data.isAdmin, userId: socket.data.userId });
     touch(result.room);
     log(`"${playerName}" вошёл в комнату ${roomId}`);
     socket.emit('joined_room', { roomId: roomId.toUpperCase().trim() });
@@ -196,7 +203,7 @@ function registerHandlers(io, socket) {
     if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
     if (room.phase !== 'lobby') return socket.emit('error', { message_ru: 'Сменить команду можно только в лобби', code: 'NOT_LOBBY' });
 
-    const result = gs.selectTeam(room, socket.id, socket.data.playerName, teamName);
+    const result = gs.selectTeam(room, socket.id, socket.data.playerName, teamName, socket.data.userId);
     if (result.error) return socket.emit('error', { message_ru: result.error, code: 'TEAM_ERROR' });
 
     touch(room);
@@ -213,7 +220,7 @@ function registerHandlers(io, socket) {
     if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
     if (room.phase !== 'lobby') return socket.emit('error', { message_ru: 'Создавать команды можно только в лобби', code: 'NOT_LOBBY' });
 
-    const result = gs.createTeam(room, socket.id, socket.data.playerName, teamName);
+    const result = gs.createTeam(room, socket.id, socket.data.playerName, teamName, socket.data.userId);
     if (result.error) return socket.emit('error', { message_ru: result.error, code: 'TEAM_ERROR' });
 
     touch(room);
@@ -261,12 +268,19 @@ function registerHandlers(io, socket) {
   });
 
   // ── START GAME (Admin only) ──────────────────────────────
-  socket.on('start_game', () => {
+  socket.on('start_game', ({ durationMinutes } = {}) => {
     const roomId = socket.data.roomId;
     const room = gs.getRoom(roomId);
     if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
     if (room.adminId !== socket.id) return socket.emit('error', { message_ru: 'Только администратор может начать игру', code: 'NOT_ADMIN' });
     if (room.phase !== 'lobby') return socket.emit('error', { message_ru: 'Игра уже запущена', code: 'ALREADY_STARTED' });
+
+    // Учитель может выбрать длительность прямо в лобби (мин). Без значения —
+    // остаётся длительность, заданная при создании комнаты.
+    if (durationMinutes != null) {
+      const mins = Math.max(5, Math.min(120, parseInt(durationMinutes) || 45));
+      room.gameDuration = mins * 60;
+    }
 
     room.phase = 'playing';
     // Точный таймер на таймстампе: без ежесекундного декремента/рассылки.
@@ -294,6 +308,23 @@ function registerHandlers(io, socket) {
       io.to(roomId).emit('game_ended', { reason: 'timeout', message_ru: '⏰ Время вышло! Игра завершена.', scores });
       io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
     }, 1000);
+  });
+
+  // ── FORCE END (Учитель завершает игру досрочно) ──────────
+  socket.on('admin_force_end_game', () => {
+    const room = gs.getRoom(socket.data.roomId);
+    if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
+    if (room.adminId !== socket.id) return socket.emit('error', { message_ru: 'Только администратор может завершить игру', code: 'NOT_ADMIN' });
+    if (room.phase !== 'playing') return socket.emit('error', { message_ru: 'Игра не активна', code: 'GAME_NOT_ACTIVE' });
+
+    if (room.timerInterval) { clearInterval(room.timerInterval); room.timerInterval = null; }
+    room.phase = 'ended';
+    touch(room);
+    const scores = buildFinalScores(room);
+    mh.finishMatch(room, scores);
+    log(`Игра ${room.roomId} ЗАВЕРШЕНА досрочно учителем`);
+    io.to(room.roomId).emit('game_ended', { reason: 'forced', message_ru: '🛑 Учитель завершил игру досрочно.', scores });
+    io.to(room.roomId).emit('room_state', gs.getPublicRoomState(room));
   });
 
   // ── PICK TASK (Captain only) ─────────────────────────────
@@ -476,6 +507,163 @@ function registerHandlers(io, socket) {
     socket.emit('custom_tasks_list', { tasks: TASKS.filter(t => t.isCustom) });
   });
 
+  // ── USER PROFILES & SOCIAL (Игроки) ──────────────────────
+
+  // Кому сейчас принадлежит сокет с данным userId (для адресной доставки).
+  function socketIdForUser(userId) {
+    for (const room of gs.rooms.values()) {
+      const found = gs.findMemberByUserId(room, userId);
+      if (found) return found.player.id;
+    }
+    return null;
+  }
+
+  // Соц-контекст цели в комнате игрока (питает кнопки инвайта/запроса; только лобби).
+  function roomSocialContext(targetUserId) {
+    const room = socket.data.roomId ? gs.getRoom(socket.data.roomId) : null;
+    if (!room || room.phase !== 'lobby') {
+      return { sameRoom: false, online: false, targetTeam: null, iAmCaptainOf: null };
+    }
+    const target = gs.findMemberByUserId(room, targetUserId);
+    const me     = socket.data.userId ? gs.findMemberByUserId(room, socket.data.userId) : null;
+    return {
+      sameRoom:     !!target,
+      online:       !!target && !target.player.offline,
+      targetTeam:   target ? target.team.teamName : null,
+      iAmCaptainOf: (me && me.team.captainId === socket.id) ? me.team.teamName : null,
+    };
+  }
+
+  // Подтолкнуть игроку (если онлайн) его собственный профиль (после смены дружбы).
+  function pushOwnProfile(userId) {
+    const sid = socketIdForUser(userId);
+    if (sid) io.to(sid).emit('my_profile', { profile: up.ownView(userId) });
+  }
+
+  const noProfile = () =>
+    socket.emit('error', { message_ru: 'Профиль доступен только игрокам', code: 'NO_PROFILE' });
+
+  // Свой профиль (полный) — для раздела «Мой профиль».
+  socket.on('get_my_profile', () => {
+    const uid = socket.data.userId;
+    if (!uid) return noProfile();
+    up.ensureUser(uid, socket.data.playerName);
+    socket.emit('my_profile', { profile: up.ownView(uid) });
+  });
+
+  // Редактирование своего профиля + флаги приватности.
+  socket.on('update_profile', ({ name, contacts, privacy } = {}) => {
+    const uid = socket.data.userId;
+    if (!uid) return noProfile();
+    const p = up.updateProfile(uid, { name, contacts, privacy });
+    if (!p) return socket.emit('error', { message_ru: 'Профиль не найден', code: 'PROFILE_NOT_FOUND' });
+    socket.emit('my_profile', { profile: up.ownView(uid) });
+  });
+
+  // Чужой мини-профиль: только публичные контакты + соц-контекст.
+  socket.on('get_profile', ({ userId } = {}) => {
+    if (!userId) return socket.emit('error', { message_ru: 'Не указан игрок', code: 'BAD_TARGET' });
+    const view = up.publicView(userId, socket.data.userId);
+    if (!view) return socket.emit('error', { message_ru: 'Профиль игрока не найден', code: 'PROFILE_NOT_FOUND' });
+    socket.emit('profile_view', { profile: view, context: roomSocialContext(userId) });
+  });
+
+  socket.on('add_friend', ({ userId } = {}) => {
+    const uid = socket.data.userId;
+    if (!uid) return noProfile();
+    const res = up.addFriend(uid, userId);
+    if (res.error) return socket.emit('error', { message_ru: res.error, code: 'FRIEND_ERROR' });
+    socket.emit('my_profile',   { profile: up.ownView(uid) });
+    socket.emit('profile_view', { profile: up.publicView(userId, uid), context: roomSocialContext(userId) });
+    pushOwnProfile(userId);   // другу — обновлённый список друзей, если онлайн
+  });
+
+  socket.on('remove_friend', ({ userId } = {}) => {
+    const uid = socket.data.userId;
+    if (!uid) return noProfile();
+    const res = up.removeFriend(uid, userId);
+    if (res.error) return socket.emit('error', { message_ru: res.error, code: 'FRIEND_ERROR' });
+    socket.emit('my_profile',   { profile: up.ownView(uid) });
+    socket.emit('profile_view', { profile: up.publicView(userId, uid), context: roomSocialContext(userId) });
+    pushOwnProfile(userId);
+  });
+
+  // Капитан приглашает игрока в свою команду (нудж; приём — через select_team).
+  socket.on('team_invite', ({ userId } = {}) => {
+    const room = gs.getRoom(socket.data.roomId);
+    if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
+    if (room.phase !== 'lobby') return socket.emit('error', { message_ru: 'Приглашать можно только в лобби', code: 'NOT_LOBBY' });
+    const me = gs.getPlayerTeam(room, socket.id);
+    if (!me || me.team.captainId !== socket.id)
+      return socket.emit('error', { message_ru: 'Приглашать может только капитан', code: 'NOT_CAPTAIN' });
+    const target = gs.findMemberByUserId(room, userId);
+    if (!target) return socket.emit('error', { message_ru: 'Игрок не в этой комнате', code: 'TARGET_NOT_HERE' });
+    if (target.team.teamName === me.team.teamName)
+      return socket.emit('error', { message_ru: 'Игрок уже в вашей команде', code: 'ALREADY_MEMBER' });
+
+    io.to(target.player.id).emit('team_invite_received', {
+      teamName: me.team.teamName, color: me.team.color, fromName: socket.data.playerName,
+    });
+    socket.emit('social_ack', { message_ru: `Приглашение отправлено игроку ${target.player.name}` });
+  });
+
+  // Игрок просит вступить в команду цели → уведомляем её капитана.
+  socket.on('team_join_request', ({ userId } = {}) => {
+    const room = gs.getRoom(socket.data.roomId);
+    if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
+    if (room.phase !== 'lobby') return socket.emit('error', { message_ru: 'Запрашивать можно только в лобби', code: 'NOT_LOBBY' });
+    if (!socket.data.userId) return noProfile();
+    const target = gs.findMemberByUserId(room, userId);
+    if (!target) return socket.emit('error', { message_ru: 'Игрок не в этой комнате', code: 'TARGET_NOT_HERE' });
+    const team = target.team;
+    const me = gs.getPlayerTeam(room, socket.id);
+    if (me && me.team.teamName === team.teamName)
+      return socket.emit('error', { message_ru: 'Вы уже в этой команде', code: 'ALREADY_MEMBER' });
+
+    const list = joinRequests.get(room.roomId) || [];
+    if (!list.some(r => r.fromUserId === socket.data.userId && r.teamName === team.teamName)) {
+      list.push({ fromUserId: socket.data.userId, fromName: socket.data.playerName, teamName: team.teamName });
+      joinRequests.set(room.roomId, list);
+    }
+    io.to(team.captainId).emit('join_request_received', {
+      fromUserId: socket.data.userId, fromName: socket.data.playerName, teamName: team.teamName,
+    });
+    socket.emit('social_ack', { message_ru: `Запрос на вступление в «${team.teamName}» отправлен капитану` });
+  });
+
+  // Капитан подтверждает/отклоняет запрос на вступление.
+  socket.on('approve_join', ({ userId, accept = true } = {}) => {
+    const room = gs.getRoom(socket.data.roomId);
+    if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
+    if (room.phase !== 'lobby') return socket.emit('error', { message_ru: 'Только в лобби', code: 'NOT_LOBBY' });
+    const me = gs.getPlayerTeam(room, socket.id);
+    if (!me || me.team.captainId !== socket.id)
+      return socket.emit('error', { message_ru: 'Подтверждать может только капитан', code: 'NOT_CAPTAIN' });
+
+    const list = joinRequests.get(room.roomId) || [];
+    const idx = list.findIndex(r => r.fromUserId === userId && r.teamName === me.team.teamName);
+    if (idx === -1) return socket.emit('error', { message_ru: 'Запрос не найден', code: 'REQUEST_NOT_FOUND' });
+    list.splice(idx, 1);
+    joinRequests.set(room.roomId, list);
+
+    const sid = socketIdForUser(userId);
+    if (!accept) {
+      if (sid) io.to(sid).emit('social_ack', { message_ru: `Капитан отклонил ваш запрос в «${me.team.teamName}»` });
+      return;
+    }
+    const reqInfo = gs.findMemberByUserId(room, userId);
+    if (!reqInfo) return socket.emit('error', { message_ru: 'Игрок уже покинул комнату', code: 'TARGET_NOT_HERE' });
+
+    const result = gs.selectTeam(room, reqInfo.player.id, reqInfo.player.name, me.team.teamName, userId);
+    if (result.error) return socket.emit('error', { message_ru: result.error, code: 'TEAM_ERROR' });
+
+    touch(room);
+    const moved = sessionBySocket(reqInfo.player.id);
+    if (moved) { moved.teamName = me.team.teamName; moved.isCaptain = false; }
+    io.to(reqInfo.player.id).emit('social_ack', { message_ru: `Вас приняли в команду «${me.team.teamName}»` });
+    io.to(room.roomId).emit('room_state', gs.getPublicRoomState(room));
+  });
+
   // ── DISCONNECT ───────────────────────────────────────────
   // ── RECONNECT по токену сессии ───────────────────────────
   socket.on('socket_reconnect', ({ sessionToken } = {}) => {
@@ -503,6 +691,7 @@ function registerHandlers(io, socket) {
     socket.data.playerName   = session.playerName;
     socket.data.isAdmin      = session.isAdmin;
     if (session.username) socket.data.username = session.username;
+    if (session.userId)   socket.data.userId   = session.userId;
 
     // Восстанавливаем капитанство / adminId / id участника
     gs.rebindSocket(room, oldId, newId);

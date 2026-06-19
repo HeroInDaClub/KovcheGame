@@ -1,9 +1,12 @@
 import { useState } from 'react';
-import { Users, Shield, Zap, Crown, Plus, UserX, Trash2, LogIn } from 'lucide-react';
+import { Users, Shield, Zap, Crown, Plus, UserX, Trash2, LogIn, User, Clock } from 'lucide-react';
+
+const DURATIONS = [15, 30, 45, 60, 90];   // минуты
 
 export default function Lobby({
   roomState, roomId, playerName, isAdmin, notification,
   onSelectTeam, onCreateTeam, onKickMember, onDeleteTeam, onStartGame,
+  onOpenProfile, onViewPlayer, myUserId,
 }) {
   const allTeams     = Object.values(roomState.teams);
   const totalPlayers = allTeams.reduce((s, t) => s + t.members.length, 0);
@@ -14,6 +17,7 @@ export default function Lobby({
 
   const [newName, setNewName]   = useState('');
   const [creating, setCreating] = useState(false);
+  const [duration, setDuration] = useState(Math.round((roomState.gameDuration || 2700) / 60));
 
   const submitCreate = () => {
     const n = newName.trim();
@@ -45,6 +49,12 @@ export default function Lobby({
           <span className="flex items-center gap-1"><Users size={13} />{totalPlayers} игроков</span>
           <span>{allTeams.length}/{maxTeams} команд</span>
           <span>{roomState.totalTasksCount ?? '?'} задач</span>
+          {!isAdmin && (
+            <button onClick={onOpenProfile}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-cyber-neon text-cyber-neon hover:bg-cyber-neon hover:text-black transition tracking-widest">
+              <User size={13} /> МОЙ ПРОФИЛЬ
+            </button>
+          )}
         </div>
       </div>
 
@@ -144,7 +154,12 @@ export default function Lobby({
                         {m.isCaptain
                           ? <Shield size={9} style={{ color: c }} className="flex-shrink-0" />
                           : <Zap size={9} className="text-cyber-muted flex-shrink-0" />}
-                        <span className="truncate" style={{ color: m.isCaptain ? c : '#a0b4c8' }}>{m.name}</span>
+                        <button
+                          onClick={() => (isSelf && !isAdmin ? onOpenProfile() : onViewPlayer?.(m.userId))}
+                          title="Открыть профиль"
+                          className="truncate text-left hover:underline"
+                          style={{ color: m.isCaptain ? c : '#a0b4c8' }}
+                        >{m.name}</button>
                         {canKick && (
                           <button onClick={() => onKickMember(m.id)}
                             title={`Выгнать ${m.name}`}
@@ -191,13 +206,27 @@ export default function Lobby({
         </div>
 
         {isAdmin && (
-          <button
-            onClick={onStartGame}
-            disabled={totalPlayers < 1}
-            className="w-full py-4 bg-cyber-neon text-black font-bold tracking-widest uppercase text-lg hover:opacity-90 transition disabled:opacity-30"
-          >
-            ⚡ НАЧАТЬ ИГРУ ({totalPlayers} игроков)
-          </button>
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2 flex-wrap text-xs">
+              <Clock size={14} className="text-cyber-purple" />
+              <span className="text-cyber-muted tracking-widest">ДЛИТЕЛЬНОСТЬ:</span>
+              {DURATIONS.map(m => (
+                <button key={m} onClick={() => setDuration(m)}
+                  className={`px-3 py-1 tracking-widest border transition
+                    ${duration === m ? 'bg-cyber-purple text-black border-cyber-purple font-bold'
+                                     : 'border-cyber-border text-cyber-muted hover:text-cyber-text'}`}>
+                  {m} мин
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => onStartGame(duration)}
+              disabled={totalPlayers < 1}
+              className="w-full py-4 bg-cyber-neon text-black font-bold tracking-widest uppercase text-lg hover:opacity-90 transition disabled:opacity-30"
+            >
+              ⚡ НАЧАТЬ ИГРУ ({duration} мин · {totalPlayers} игроков)
+            </button>
+          </div>
         )}
         {!isAdmin && (
           <div className="text-center text-cyber-muted text-xs animate-pulse-neon pb-4">

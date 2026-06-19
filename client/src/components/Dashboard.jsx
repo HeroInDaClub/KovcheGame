@@ -18,7 +18,7 @@ function formatTime(seconds) {
 export default function Dashboard({
   roomState, timer, taskResult,
   playerName, isAdmin, notification,
-  onPickTask, onSubmit, onAbandon, onStartGame,
+  onPickTask, onSubmit, onAbandon, onStartGame, onOpenProfile,
 }) {
   const [filterLevel, setFilterLevel] = useState(0);
   const [filterType,  setFilterType]  = useState('all'); // all | multiple_choice | code_repair
@@ -97,6 +97,13 @@ export default function Dashboard({
             {isCaptain && <span className="text-cyber-muted">(капитан)</span>}
             <span className="text-cyber-muted">· {myTeam.score} очков</span>
           </div>
+        )}
+
+        {!isAdmin && (
+          <button onClick={onOpenProfile}
+            className="px-3 py-1 border border-cyber-neon text-cyber-neon text-xs font-bold tracking-widest hover:bg-cyber-neon hover:text-black transition">
+            👤 ПРОФИЛЬ
+          </button>
         )}
 
         {isAdmin && roomState.phase === 'lobby' && (
