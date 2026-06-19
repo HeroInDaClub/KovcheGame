@@ -47,7 +47,7 @@ export default function CodeRepairPanel({ task, result, isCaptain, onSubmit, onA
         {hasOptions ? (
           <div className="space-y-2 pt-1">
             {task.options.map((opt, idx) => {
-              const isCorrect = solved && opt === task.correct_answer;
+              const isCorrect = solved && result?.correctAnswer != null && opt === result.correctAnswer;
               const disabled  = solved || !isCaptain;
               return (
                 <button

@@ -192,7 +192,12 @@ export default function App() {
       setPoolSel(prev => Array.from(new Set([...prev, ...(packIds || []).map(String)])));
       notify(`📦 Импортировано задач: ${total} (новых: ${added}). Отмечены — нажмите «Применить пул».`, 6000);
     });
-    socket.on('task_pool_set', ({ count }) => notify(`✓ Пул матча зафиксирован: ${count} задач`, 4000));
+    socket.on('task_pool_set', ({ count, sectors }) => {
+      const warn = (sectors != null && sectors < 12)
+        ? ` ⚠️ Покрыто ${sectors}/12 секторов — победа «по секторам» невозможна (только по таймеру).`
+        : '';
+      notify(`✓ Пул зафиксирован: ${count} задач.${warn}`, warn ? 7000 : 4000);
+    });
 
     return () => {
       disconnect();
@@ -224,6 +229,7 @@ export default function App() {
     ids.forEach(i => on ? s.add(i) : s.delete(i));
     return [...s];
   });
+  const replacePool   = (ids) => setPoolSel(ids.map(String));
   const applyPool = () => { socket.emit('admin_set_task_pool', { taskIds: poolSel }); setPoolMgr(false); };
 
   const importPackFile = (file) => {
@@ -258,7 +264,7 @@ export default function App() {
   const taskPoolLayer = poolMgr ? (
     <TaskPoolManager
       catalog={catalog} selectedIds={poolSel}
-      onToggle={togglePool} onSetMany={setManyPool}
+      onToggle={togglePool} onSetMany={setManyPool} onReplace={replacePool}
       onApply={applyPool} onExport={exportPack} onImportFile={importPackFile}
       onClose={() => setPoolMgr(false)}
     />
@@ -410,7 +416,7 @@ function EntryScreen({ onAdmin, onRegister, onPlayer, notification }) {
 
       <div className="mb-8 text-center">
         <div className="text-4xl font-bold text-cyber-neon text-shadow-neon tracking-widest mb-2">
-          AEGIS-X
+          Спасение Ковчега
         </div>
         <div className="text-cyber-blue text-sm tracking-[0.3em] uppercase">
           Кибер-Осада Межзвёздного Ковчега

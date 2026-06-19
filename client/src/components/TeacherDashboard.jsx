@@ -99,7 +99,7 @@ export default function TeacherDashboard({
       {/* ── Компактная верхняя панель ── */}
       <header className="flex-shrink-0 border-b border-cyber-border bg-cyber-panel px-4 py-2 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <span className="text-cyber-purple font-bold tracking-widest">AEGIS-X</span>
+          <span className="text-cyber-purple font-bold tracking-widest">Спасение Ковчега</span>
           <span className="text-[10px] border border-cyber-purple/50 text-cyber-purple px-2 py-px tracking-widest">
             УЧИТЕЛЬ · ТРАНСЛЯЦИЯ
           </span>

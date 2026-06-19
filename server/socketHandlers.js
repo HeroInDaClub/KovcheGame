@@ -1,5 +1,5 @@
 // ============================================================
-// Aegis-X: Cyber-Siege — Socket.io Event Handlers
+// Спасение Ковчега — Socket.io Event Handlers
 // ============================================================
 
 const crypto = require('crypto');
@@ -12,7 +12,10 @@ const { TASKS, addCustomTask, removeCustomTask } = require('./taskDatabase');
 // Сессии переподключения: Map<sessionToken, {...}>. Память сервера (сброс при
 // рестарте). При disconnect игрок не удаляется сразу — действует grace-период.
 const sessions = new Map();
-const GRACE_MS = 45 * 1000;
+// Grace-период до окончательного удаления offline-сессии. Увеличен со 45с:
+// при коротких обрывах/засыпании вкладки сессия (и привязка комнаты у учителя)
+// должна пережить переподключение, иначе start_game ловит «комната не найдена».
+const GRACE_MS = 2 * 60 * 1000;
 
 // Запросы на вступление в команду: Map<roomId, Array<{fromUserId, fromName, teamName}>>
 const joinRequests = new Map();
@@ -417,9 +420,12 @@ function registerHandlers(io, socket) {
           scores,
         });
       }
-
-      io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
     }
+
+    // Рассылаем room_state ПОСЛЕ ЛЮБОГО ответа: при провале MC сервер очищает
+    // activeTaskId (задача заблокирована) — без этого клиент не закрывает модалку.
+    // Также синхронизирует attempts/статусы задач в сетке у всей команды.
+    io.to(roomId).emit('room_state', gs.getPublicRoomState(room));
   });
 
   // ── ABANDON TASK ─────────────────────────────────────────
@@ -545,8 +551,10 @@ function registerHandlers(io, socket) {
 
     room.taskPool = pool;
     touch(room);
-    log(`Учитель зафиксировал пул: ${pool.length} задач в комнате ${room.roomId}`);
-    socket.emit('task_pool_set', { count: pool.length });
+    // Сколько из 12 секторов покрыто: если <12 — победа «по секторам» недостижима.
+    const sectors = new Set(pool.map(t => t.sector)).size;
+    log(`Учитель зафиксировал пул: ${pool.length} задач (${sectors}/12 секторов) в комнате ${room.roomId}`);
+    socket.emit('task_pool_set', { count: pool.length, sectors });
     io.to(room.roomId).emit('room_state', gs.getPublicRoomState(room));
   });
 
@@ -845,9 +853,11 @@ function sanitizeImportedTask(raw) {
   if (Array.isArray(raw.keywords))        t.keywords        = raw.keywords.map(String);
   if (raw.image_url)                      t.image_url       = String(raw.image_url);
 
-  // Отсев заведомо непригодных задач.
+  // Отсев заведомо непригодных/нерешаемых задач.
   if (t.type === 'multiple_choice' && (!t.options || t.options.length < 2)) return null;
   if (['text_phrase', 'code_repair', 'multiple_choice'].includes(t.type) && !t.correct_answer) return null;
+  if (t.type === 'full_code' && (!t.entry || !Array.isArray(t.tests) || t.tests.length === 0)) return null;
+  if (t.type === 'interactive_match' && (!Array.isArray(t.pairs) || t.pairs.length < 2)) return null;
   return t;
 }
 

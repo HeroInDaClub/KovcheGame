@@ -1,5 +1,15 @@
 import { useMemo, useRef, useState } from 'react';
-import { X, Download, Upload, Check, Search, ListChecks } from 'lucide-react';
+import { X, Download, Upload, Check, Search, ListChecks, Shuffle } from 'lucide-react';
+
+// Тасование (Фишер–Йейтс) — копия, не мутируем исходный массив.
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 const TYPE_LABELS = {
   text_phrase:       'ЛОГИКА',
@@ -16,11 +26,12 @@ const LEVEL_COLORS = ['', '#4ae54a', '#99ff44', '#ffd60a', '#ff9f0a', '#ff2d55']
 
 // Менеджер пула задач (учитель, перед стартом). Выбор чекбоксами + экспорт/импорт пака.
 export default function TaskPoolManager({
-  catalog, selectedIds, onToggle, onSetMany, onApply, onExport, onImportFile, onClose,
+  catalog, selectedIds, onToggle, onSetMany, onReplace, onApply, onExport, onImportFile, onClose,
 }) {
   const [q,        setQ]        = useState('');
   const [lvl,      setLvl]      = useState(0);     // 0 = все
   const [type,     setType]     = useState('all');
+  const [randN,    setRandN]    = useState(20);    // сколько случайных задач взять
   const fileRef = useRef(null);
 
   const selected = useMemo(() => new Set((selectedIds || []).map(String)), [selectedIds]);
@@ -42,6 +53,13 @@ export default function TaskPoolManager({
     const f = e.target.files?.[0];
     if (f) onImportFile(f);
     e.target.value = '';   // позволяем повторно выбрать тот же файл
+  };
+
+  // Случайно выбрать N задач из ПОКАЗАННЫХ (учитывая активные фильтры) и
+  // заменить ими текущий выбор.
+  const pickRandom = () => {
+    const n = Math.max(1, Math.min(randN || 1, filteredIds.length));
+    onReplace(shuffle(filteredIds).slice(0, n));
   };
 
   return (
@@ -85,9 +103,27 @@ export default function TaskPoolManager({
           </div>
         </div>
 
-        {/* Действие над показанными */}
-        <div className="border-b border-cyber-border px-4 py-1.5 flex items-center justify-between text-[10px] text-cyber-muted flex-shrink-0">
-          <span>Показано: {filtered.length}</span>
+        {/* Действия над показанными */}
+        <div className="border-b border-cyber-border px-4 py-1.5 flex items-center gap-2 flex-wrap text-[10px] text-cyber-muted flex-shrink-0">
+          <span className="mr-auto">Показано: {filtered.length}</span>
+
+          {/* Случайный набор из показанных */}
+          <div className="flex items-center border border-cyber-border">
+            <input
+              type="number" min={1} max={filteredIds.length || 1} value={randN}
+              onChange={e => setRandN(parseInt(e.target.value) || 1)}
+              title="Сколько случайных задач взять"
+              className="w-12 bg-cyber-dark text-cyber-text text-[10px] px-1.5 py-1 focus:outline-none text-center"
+            />
+            <button
+              onClick={pickRandom}
+              disabled={filteredIds.length === 0}
+              title="Выбрать N случайных задач из показанных (заменяет текущий выбор)"
+              className="flex items-center gap-1 px-2 py-1 bg-cyber-purple text-black font-bold tracking-widest hover:opacity-90 disabled:opacity-30">
+              <Shuffle size={11} /> СЛУЧАЙНО
+            </button>
+          </div>
+
           <button
             onClick={() => onSetMany(filteredIds, !allShownSelected)}
             className="px-2 py-1 border border-cyber-border text-cyber-text hover:border-cyber-neon hover:text-cyber-neon tracking-widest">

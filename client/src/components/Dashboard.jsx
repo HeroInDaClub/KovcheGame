@@ -72,7 +72,7 @@ export default function Dashboard({
       {/* ── Top Bar ──────────────────────────────────────── */}
       <div className="border-b border-cyber-border bg-cyber-panel px-4 py-2 flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
-          <span className="text-cyber-neon font-bold tracking-widest">AEGIS-X</span>
+          <span className="text-cyber-neon font-bold tracking-widest">Спасение Ковчега</span>
           <span className="text-cyber-muted text-xs hidden sm:block">// КИБЕР-ОСАДА</span>
         </div>
 

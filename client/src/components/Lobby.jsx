@@ -43,7 +43,7 @@ export default function Lobby({
       {/* Header */}
       <div className="border-b border-cyber-border px-6 py-4 flex items-center justify-between bg-cyber-panel flex-wrap gap-3">
         <div>
-          <span className="text-cyber-neon font-bold tracking-widest text-lg">AEGIS-X</span>
+          <span className="text-cyber-neon font-bold tracking-widest text-lg">Спасение Ковчега</span>
           <span className="text-cyber-muted text-xs ml-3">// ЛОББИ</span>
         </div>
         <div className="flex items-center gap-3 text-xs">
