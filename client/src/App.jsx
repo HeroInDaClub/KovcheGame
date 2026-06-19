@@ -224,6 +224,7 @@ export default function App() {
     ids.forEach(i => on ? s.add(i) : s.delete(i));
     return [...s];
   });
+  const replacePool   = (ids) => setPoolSel(ids.map(String));
   const applyPool = () => { socket.emit('admin_set_task_pool', { taskIds: poolSel }); setPoolMgr(false); };
 
   const importPackFile = (file) => {
@@ -258,7 +259,7 @@ export default function App() {
   const taskPoolLayer = poolMgr ? (
     <TaskPoolManager
       catalog={catalog} selectedIds={poolSel}
-      onToggle={togglePool} onSetMany={setManyPool}
+      onToggle={togglePool} onSetMany={setManyPool} onReplace={replacePool}
       onApply={applyPool} onExport={exportPack} onImportFile={importPackFile}
       onClose={() => setPoolMgr(false)}
     />
