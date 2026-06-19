@@ -1,10 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { socket, connect, disconnect } from './socket.js';
 import AdminPanel       from './components/AdminPanel.jsx';
 import Lobby            from './components/Lobby.jsx';
 import Dashboard        from './components/Dashboard.jsx';
 import TeacherDashboard from './components/TeacherDashboard.jsx';
 import GameOver         from './components/GameOver.jsx';
+import ProfilePanel       from './components/ProfilePanel.jsx';
+import PlayerProfileModal from './components/PlayerProfileModal.jsx';
+import TaskPoolManager    from './components/TaskPoolManager.jsx';
+import { getUserId }      from './profile.js';
 
 // ── App-level view states ────────────────────────────────
 // 'entry'    → Choose: Admin or Player
@@ -33,6 +37,22 @@ export default function App() {
   const [notification, setNotif]   = useState('');
   const [customTasks,  setCustomTasks] = useState([]);
   const [lastSaved,    setLastSaved]   = useState(null);
+
+  // ── Профили / соц-функции ──
+  const myUserId = useMemo(() => getUserId(), []);
+  const [myProfile,   setMyProfile]   = useState(null);
+  const [showProfile, setShowProfile] = useState(false);
+  const [viewProfile, setViewProfile] = useState(null);   // { profile, context }
+  const [invite,      setInvite]      = useState(null);    // входящий team_invite
+  const [joinReqs,    setJoinReqs]    = useState([]);      // входящие запросы (капитан)
+
+  // ── Пул задач (учитель) ──
+  const [poolMgr,  setPoolMgr]  = useState(false);
+  const [catalog,  setCatalog]  = useState([]);            // полный каталог задач
+  const [poolSel,  setPoolSel]  = useState([]);            // рабочий выбор (id, строки)
+
+  // Ошибка валидации названия команды (показывается под инпутом)
+  const [teamError, setTeamError] = useState('');
 
   const notify = useCallback((msg, duration = 4000) => {
     setNotif(msg);
@@ -122,7 +142,9 @@ export default function App() {
       setView('ended');
     });
 
-    socket.on('error', ({ message_ru }) => {
+    socket.on('error', ({ message_ru, code }) => {
+      // Ошибки названия команды показываем под инпутом создания (не глобально).
+      if (code === 'TEAM_ERROR') { setTeamError(message_ru); return; }
       notify(`⚠️ ${message_ru}`, 5000);
     });
 
@@ -148,6 +170,30 @@ export default function App() {
       notify(`${ok ? '✅' : '⚠️'} ${message_ru}`, 4500);
     });
 
+    // ── Профили / соц-функции ──
+    socket.on('my_profile',   ({ profile }) => setMyProfile(profile));
+    socket.on('profile_view', (data)        => setViewProfile(data));
+    socket.on('social_ack',   ({ message_ru }) => notify(`✓ ${message_ru}`, 4000));
+    socket.on('team_invite_received', (data) => {
+      setInvite(data);
+      notify(`📨 ${data.fromName} зовёт в команду «${data.teamName}»`, 6000);
+    });
+    socket.on('join_request_received', (data) => {
+      setJoinReqs(q => [...q.filter(r => r.fromUserId !== data.fromUserId), data]);
+      notify(`🙋 ${data.fromName} просится в «${data.teamName}»`, 6000);
+    });
+
+    // ── Пул задач ──
+    socket.on('all_tasks_list', ({ tasks, poolIds }) => {
+      setCatalog(tasks);
+      setPoolSel((poolIds || []).map(String));
+    });
+    socket.on('pack_imported', ({ packIds, added, total }) => {
+      setPoolSel(prev => Array.from(new Set([...prev, ...(packIds || []).map(String)])));
+      notify(`📦 Импортировано задач: ${total} (новых: ${added}). Отмечены — нажмите «Применить пул».`, 6000);
+    });
+    socket.on('task_pool_set', ({ count }) => notify(`✓ Пул матча зафиксирован: ${count} задач`, 4000));
+
     return () => {
       disconnect();
       socket.removeAllListeners();
@@ -167,23 +213,94 @@ export default function App() {
     return () => clearInterval(id);
   }, [endTimestamp, roomState?.gameDuration]);
 
+  const openMyProfile = () => { socket.emit('get_my_profile'); setShowProfile(true); };
+  const viewPlayer    = (userId) => userId && socket.emit('get_profile', { userId });
+
+  // ── Пул задач (учитель) ──
+  const openTaskPool = () => { socket.emit('admin_get_all_tasks'); setPoolMgr(true); };
+  const togglePool    = (id) => setPoolSel(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const setManyPool   = (ids, on) => setPoolSel(prev => {
+    const s = new Set(prev);
+    ids.forEach(i => on ? s.add(i) : s.delete(i));
+    return [...s];
+  });
+  const applyPool = () => { socket.emit('admin_set_task_pool', { taskIds: poolSel }); setPoolMgr(false); };
+
+  const importPackFile = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        const tasks = Array.isArray(data)            ? data
+                    : Array.isArray(data.tasks)      ? data.tasks
+                    : Array.isArray(data.taskIds)    ? data.taskIds.map(id => ({ id }))
+                    : null;
+        if (!tasks || tasks.length === 0) return notify('⚠️ Пустой или неверный файл пака', 4000);
+        socket.emit('admin_import_pack', { tasks });
+      } catch { notify('⚠️ Не удалось прочитать JSON', 4000); }
+    };
+    reader.readAsText(file);
+  };
+
+  const exportPack = () => {
+    const set = new Set(poolSel.map(String));
+    const tasks = catalog.filter(t => set.has(String(t.id)));
+    const pack = { format: 'aegis-task-pack', version: 1, createdAt: new Date().toISOString(), count: tasks.length, tasks };
+    const blob = new Blob([JSON.stringify(pack, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `aegis-pack-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const taskPoolLayer = poolMgr ? (
+    <TaskPoolManager
+      catalog={catalog} selectedIds={poolSel}
+      onToggle={togglePool} onSetMany={setManyPool}
+      onApply={applyPool} onExport={exportPack} onImportFile={importPackFile}
+      onClose={() => setPoolMgr(false)}
+    />
+  ) : null;
+
+  const socialLayer = (
+    <SocialLayer
+      canSocial={!isAdmin}
+      myProfile={myProfile}     showProfile={showProfile} onCloseProfile={() => setShowProfile(false)}
+      viewProfile={viewProfile} onCloseView={() => setViewProfile(null)}
+      invite={invite}           onCloseInvite={() => setInvite(null)}
+      joinReqs={joinReqs}
+      onViewPlayer={viewPlayer}
+      onSaveProfile={(patch)   => socket.emit('update_profile', patch)}
+      onAddFriend={(id)        => socket.emit('add_friend', { userId: id })}
+      onRemoveFriend={(id)     => socket.emit('remove_friend', { userId: id })}
+      onInvite={(id)           => socket.emit('team_invite', { userId: id })}
+      onRequestJoin={(id)      => socket.emit('team_join_request', { userId: id })}
+      onAcceptInvite={(team)   => { saveSession({ teamName: team }); socket.emit('select_team', { teamName: team }); setInvite(null); }}
+      onRespondJoin={(id, ok)  => { socket.emit('approve_join', { userId: id, accept: ok }); setJoinReqs(q => q.filter(r => r.fromUserId !== id)); }}
+    />
+  );
+
   if (view === 'ended' && gameOver) {
     return <GameOver gameOver={gameOver} roomState={roomState} />;
   }
 
   if (view === 'playing' && roomState) {
     if (isAdmin) {
-      return (
+      return (<>
         <TeacherDashboard
           roomState={roomState}
           timer={timer ?? roomState.gameDuration}
           isAdmin={isAdmin}
           notification={notification}
           onStartGame={() => socket.emit('start_game')}
+          onForceEnd={() => socket.emit('admin_force_end_game')}
         />
-      );
+        {socialLayer}
+      </>);
     }
-    return (
+    return (<>
       <Dashboard
         roomState={roomState}
         timer={timer ?? roomState.gameDuration}
@@ -195,12 +312,14 @@ export default function App() {
         onSubmit={(answer)   => socket.emit('submit_answer', { answer })}
         onAbandon={()        => socket.emit('abandon_task')}
         onStartGame={()      => socket.emit('start_game')}
+        onOpenProfile={openMyProfile}
       />
-    );
+      {socialLayer}
+    </>);
   }
 
   if ((view === 'lobby' || (view === 'admin' && roomId)) && roomState) {
-    return (
+    return (<>
       <Lobby
         roomState={roomState}
         roomId={roomId}
@@ -208,12 +327,20 @@ export default function App() {
         isAdmin={isAdmin}
         notification={notification}
         onSelectTeam={(teamName) => { saveSession({ teamName }); socket.emit('select_team', { teamName }); }}
-        onCreateTeam={(teamName) => { saveSession({ teamName }); socket.emit('create_team', { teamName }); }}
+        onCreateTeam={(teamName) => { setTeamError(''); saveSession({ teamName }); socket.emit('create_team', { teamName }); }}
         onKickMember={(targetId) => socket.emit('kick_member', { targetId })}
+        teamError={teamError}
+        onClearTeamError={() => setTeamError('')}
         onDeleteTeam={(teamName) => socket.emit('delete_team', { teamName })}
-        onStartGame={()          => socket.emit('start_game')}
+        onStartGame={(minutes)   => socket.emit('start_game', { durationMinutes: minutes })}
+        onOpenProfile={openMyProfile}
+        onViewPlayer={viewPlayer}
+        onOpenTaskPool={openTaskPool}
+        myUserId={myUserId}
       />
-    );
+      {socialLayer}
+      {taskPoolLayer}
+    </>);
   }
 
   if (view === 'admin') {
@@ -251,7 +378,7 @@ export default function App() {
         setPlayerName(name);
         setIsAdmin(false);
         saveSession({ playerName: name });
-        socket.emit('join_room', { roomId: code.toUpperCase(), playerName: name });
+        socket.emit('join_room', { roomId: code.toUpperCase(), playerName: name, userId: myUserId });
       }}
     />
   );
@@ -388,5 +515,59 @@ function EntryScreen({ onAdmin, onRegister, onPlayer, notification }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ── Соц-слой: модалки профиля/просмотра + входящие инвайты/запросы ──
+function SocialLayer({
+  canSocial, myProfile, showProfile, onCloseProfile,
+  viewProfile, onCloseView, invite, onCloseInvite, joinReqs,
+  onViewPlayer, onSaveProfile, onAddFriend, onRemoveFriend,
+  onInvite, onRequestJoin, onAcceptInvite, onRespondJoin,
+}) {
+  return (
+    <>
+      {showProfile && myProfile && (
+        <ProfilePanel
+          profile={myProfile}
+          onSave={onSaveProfile}
+          onClose={onCloseProfile}
+          onRemoveFriend={onRemoveFriend}
+          onViewFriend={onViewPlayer}
+        />
+      )}
+
+      {viewProfile && (
+        <PlayerProfileModal
+          data={viewProfile} canSocial={canSocial}
+          onClose={onCloseView}
+          onAddFriend={onAddFriend} onRemoveFriend={onRemoveFriend}
+          onInvite={onInvite} onRequestJoin={onRequestJoin}
+          onViewFriend={onViewPlayer}
+        />
+      )}
+
+      {/* Входящее приглашение в команду */}
+      {invite && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[140] bg-cyber-panel border border-cyber-purple shadow-neon px-4 py-3 font-mono text-xs flex items-center gap-3">
+          <span className="text-cyber-text"><b className="text-cyber-purple">{invite.fromName}</b> зовёт в «{invite.teamName}»</span>
+          <button onClick={() => onAcceptInvite(invite.teamName)} className="px-3 py-1 bg-cyber-neon text-black font-bold tracking-widest">ПРИНЯТЬ</button>
+          <button onClick={onCloseInvite} className="px-2 py-1 text-cyber-muted hover:text-cyber-red">✕</button>
+        </div>
+      )}
+
+      {/* Входящие запросы на вступление (видит капитан) */}
+      {joinReqs.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-[140] flex flex-col gap-2 font-mono text-xs">
+          {joinReqs.map(r => (
+            <div key={r.fromUserId} className="bg-cyber-panel border border-cyber-blue shadow-blue px-4 py-3 flex items-center gap-3">
+              <span className="text-cyber-text"><b className="text-cyber-blue">{r.fromName}</b> → «{r.teamName}»</span>
+              <button onClick={() => onRespondJoin(r.fromUserId, true)}  className="px-3 py-1 bg-cyber-neon text-black font-bold tracking-widest">ПРИНЯТЬ</button>
+              <button onClick={() => onRespondJoin(r.fromUserId, false)} className="px-2 py-1 text-cyber-muted hover:text-cyber-red">✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }

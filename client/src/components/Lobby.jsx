@@ -1,9 +1,13 @@
-import { useState } from 'react';
-import { Users, Shield, Zap, Crown, Plus, UserX, Trash2, LogIn } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Users, Shield, Zap, Crown, Plus, UserX, Trash2, LogIn, User, Clock, ListChecks } from 'lucide-react';
+
+const DURATIONS = [15, 30, 45, 60, 90];   // минуты
 
 export default function Lobby({
   roomState, roomId, playerName, isAdmin, notification,
   onSelectTeam, onCreateTeam, onKickMember, onDeleteTeam, onStartGame,
+  onOpenProfile, onViewPlayer, onOpenTaskPool, myUserId,
+  teamError, onClearTeamError,
 }) {
   const allTeams     = Object.values(roomState.teams);
   const totalPlayers = allTeams.reduce((s, t) => s + t.members.length, 0);
@@ -14,14 +18,19 @@ export default function Lobby({
 
   const [newName, setNewName]   = useState('');
   const [creating, setCreating] = useState(false);
+  const [duration, setDuration] = useState(Math.round((roomState.gameDuration || 2700) / 60));
 
   const submitCreate = () => {
     const n = newName.trim();
     if (!n) return;
-    onCreateTeam(n);
-    setNewName('');
-    setCreating(false);
+    onCreateTeam(n);   // форму закроет успех (effect ниже), иначе покажется ошибка под инпутом
   };
+
+  // Закрываем форму создания только когда сервер реально создал команду
+  // (моя команда сменилась). При ошибке валидации форма остаётся открытой.
+  useEffect(() => {
+    if (myTeam) { setCreating(false); setNewName(''); }
+  }, [myTeam?.teamName]); // eslint-disable-line
 
   return (
     <div className="min-h-screen bg-cyber-dark cyber-grid flex flex-col font-mono">
@@ -45,6 +54,12 @@ export default function Lobby({
           <span className="flex items-center gap-1"><Users size={13} />{totalPlayers} игроков</span>
           <span>{allTeams.length}/{maxTeams} команд</span>
           <span>{roomState.totalTasksCount ?? '?'} задач</span>
+          {!isAdmin && (
+            <button onClick={onOpenProfile}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-cyber-neon text-cyber-neon hover:bg-cyber-neon hover:text-black transition tracking-widest">
+              <User size={13} /> МОЙ ПРОФИЛЬ
+            </button>
+          )}
         </div>
       </div>
 
@@ -62,25 +77,31 @@ export default function Lobby({
           </div>
           {canCreate && !isAdmin && (
             creating ? (
-              <div className="flex items-center gap-2">
-                <input
-                  autoFocus
-                  value={newName}
-                  maxLength={24}
-                  onChange={e => setNewName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && submitCreate()}
-                  placeholder="Название команды"
-                  className="bg-cyber-dark border border-cyber-neon text-cyber-text px-3 py-1.5 text-xs focus:outline-none w-44"
-                />
-                <button onClick={submitCreate} disabled={!newName.trim()}
-                  className="px-3 py-1.5 bg-cyber-neon text-black text-xs font-bold tracking-widest hover:opacity-90 disabled:opacity-30">
-                  СОЗДАТЬ
-                </button>
-                <button onClick={() => { setCreating(false); setNewName(''); }}
-                  className="text-cyber-muted text-xs hover:text-cyber-text">✕</button>
+              <div className="flex flex-col gap-1 items-start">
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    value={newName}
+                    maxLength={20}
+                    onChange={e => { setNewName(e.target.value); if (teamError) onClearTeamError?.(); }}
+                    onKeyDown={e => e.key === 'Enter' && submitCreate()}
+                    placeholder="Название команды"
+                    className={`bg-cyber-dark border text-cyber-text px-3 py-1.5 text-xs focus:outline-none w-44
+                      ${teamError ? 'border-cyber-red' : 'border-cyber-neon'}`}
+                  />
+                  <button onClick={submitCreate} disabled={!newName.trim()}
+                    className="px-3 py-1.5 bg-cyber-neon text-black text-xs font-bold tracking-widest hover:opacity-90 disabled:opacity-30">
+                    СОЗДАТЬ
+                  </button>
+                  <button onClick={() => { setCreating(false); setNewName(''); onClearTeamError?.(); }}
+                    className="text-cyber-muted text-xs hover:text-cyber-text">✕</button>
+                </div>
+                {/* Ошибка валидации с сервера — прямо под инпутом */}
+                {teamError && <div className="text-cyber-red text-[10px] max-w-[260px]">⚠ {teamError}</div>}
+                <div className="text-cyber-muted text-[9px]">2–20 символов · буквы, цифры, пробелы</div>
               </div>
             ) : (
-              <button onClick={() => setCreating(true)}
+              <button onClick={() => { setCreating(true); onClearTeamError?.(); }}
                 className="flex items-center gap-1.5 px-4 py-2 border border-cyber-neon text-cyber-neon text-xs font-bold tracking-widest hover:bg-cyber-neon hover:text-black transition">
                 <Plus size={13} /> СОЗДАТЬ КОМАНДУ
               </button>
@@ -117,8 +138,8 @@ export default function Lobby({
               >
                 {/* Name */}
                 <div className="flex items-center justify-between gap-2 min-w-0">
-                  <div className="text-xs font-bold tracking-widest flex items-center gap-1 min-w-0"
-                    style={{ color: isMine ? c : '#c8d8f0' }}>
+                  <div className={`text-xs font-bold tracking-widest flex items-center gap-1 min-w-0 ${isMine ? '' : 'text-cyber-text'}`}
+                    style={isMine ? { color: c } : undefined}>
                     {isMine && <Crown size={10} className="flex-shrink-0" />}
                     <span className="truncate" title={team.teamName}>{team.teamName.toUpperCase()}</span>
                   </div>
@@ -144,7 +165,12 @@ export default function Lobby({
                         {m.isCaptain
                           ? <Shield size={9} style={{ color: c }} className="flex-shrink-0" />
                           : <Zap size={9} className="text-cyber-muted flex-shrink-0" />}
-                        <span className="truncate" style={{ color: m.isCaptain ? c : '#a0b4c8' }}>{m.name}</span>
+                        <button
+                          onClick={() => (isSelf && !isAdmin ? onOpenProfile() : onViewPlayer?.(m.userId))}
+                          title="Открыть профиль"
+                          className={`truncate text-left hover:underline ${m.isCaptain ? '' : 'text-cyber-muted'}`}
+                          style={m.isCaptain ? { color: c } : undefined}
+                        >{m.name}</button>
                         {canKick && (
                           <button onClick={() => onKickMember(m.id)}
                             title={`Выгнать ${m.name}`}
@@ -191,13 +217,31 @@ export default function Lobby({
         </div>
 
         {isAdmin && (
-          <button
-            onClick={onStartGame}
-            disabled={totalPlayers < 1}
-            className="w-full py-4 bg-cyber-neon text-black font-bold tracking-widest uppercase text-lg hover:opacity-90 transition disabled:opacity-30"
-          >
-            ⚡ НАЧАТЬ ИГРУ ({totalPlayers} игроков)
-          </button>
+          <div className="flex flex-col gap-3">
+            <button onClick={onOpenTaskPool}
+              className="flex items-center justify-center gap-2 py-2.5 border border-cyber-purple text-cyber-purple text-sm font-bold tracking-widest hover:bg-cyber-purple hover:text-black transition">
+              <ListChecks size={15} /> ПУЛ ЗАДАЧ ({roomState.taskPool?.length ?? 0}) · ЭКСПОРТ/ИМПОРТ ПАКА
+            </button>
+            <div className="flex items-center gap-2 flex-wrap text-xs">
+              <Clock size={14} className="text-cyber-purple" />
+              <span className="text-cyber-muted tracking-widest">ДЛИТЕЛЬНОСТЬ:</span>
+              {DURATIONS.map(m => (
+                <button key={m} onClick={() => setDuration(m)}
+                  className={`px-3 py-1 tracking-widest border transition
+                    ${duration === m ? 'bg-cyber-purple text-black border-cyber-purple font-bold'
+                                     : 'border-cyber-border text-cyber-muted hover:text-cyber-text'}`}>
+                  {m} мин
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => onStartGame(duration)}
+              disabled={totalPlayers < 1}
+              className="w-full py-4 bg-cyber-neon text-black font-bold tracking-widest uppercase text-lg hover:opacity-90 transition disabled:opacity-30"
+            >
+              ⚡ НАЧАТЬ ИГРУ ({duration} мин · {totalPlayers} игроков)
+            </button>
+          </div>
         )}
         {!isAdmin && (
           <div className="text-center text-cyber-muted text-xs animate-pulse-neon pb-4">

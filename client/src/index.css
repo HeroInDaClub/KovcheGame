@@ -54,3 +54,38 @@ html[data-theme="light"] .cyber-grid {
     linear-gradient(rgba(0, 80, 160, 0.06) 1px, transparent 1px),
     linear-gradient(90deg, rgba(0, 80, 160, 0.06) 1px, transparent 1px) !important;
 }
+
+/* Базовый цвет текста — чтобы любой неклассифицированный текст был тёмным */
+html[data-theme="light"] { color: #1f2a44; }
+
+/* Дополнительные фоновые токены */
+html[data-theme="light"] .bg-cyber-purple\/15,
+html[data-theme="light"] .bg-cyber-blue\/15,
+html[data-theme="light"] .bg-cyber-neon\/15,
+html[data-theme="light"] .bg-cyber-neon\/10,
+html[data-theme="light"] .bg-cyber-red\/15 { background-color: rgba(0,0,0,0.04) !important; }
+
+/* Полупрозрачные тёмные подложки (ховеры/панели кода) — делаем светлыми,
+   чтобы тёмный текст не оказывался на тёмном фоне */
+html[data-theme="light"] .bg-cyber-dark\/60 { background-color: rgba(225,231,242,0.75) !important; }
+html[data-theme="light"] .bg-cyber-dark\/80 { background-color: rgba(231,236,245,0.9)  !important; }
+
+/* Убираем неоновое свечение/пульсацию — спокойные мягкие тени вместо «грязного» неона */
+html[data-theme="light"] .text-shadow-neon,
+html[data-theme="light"] .text-shadow-blue { text-shadow: none !important; }
+html[data-theme="light"] .shadow-neon,
+html[data-theme="light"] .shadow-blue,
+html[data-theme="light"] .shadow-red,
+html[data-theme="light"] .shadow-purple {
+  box-shadow: 0 1px 4px rgba(20, 30, 60, 0.12), 0 0 0 1px rgba(20, 30, 60, 0.05) !important;
+}
+html[data-theme="light"] .animate-pulse-neon { animation: none !important; }
+
+/* Инпуты/плейсхолдеры: тёмный текст, читаемый плейсхолдер */
+html[data-theme="light"] input,
+html[data-theme="light"] textarea { color: #1f2a44; }
+html[data-theme="light"] input::placeholder,
+html[data-theme="light"] textarea::placeholder { color: #8a97ad; }
+
+/* Чекбоксы пула задач */
+html[data-theme="light"] input[type="checkbox"] { accent-color: #0a9d6e; }

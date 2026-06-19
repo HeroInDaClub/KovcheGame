@@ -62,7 +62,7 @@ function TeamHudBar({ team, captured }) {
 
 // ── Главный компонент (проекторный режим) ────────────────
 export default function TeacherDashboard({
-  roomState, timer, isAdmin, notification, onStartGame,
+  roomState, timer, isAdmin, notification, onStartGame, onForceEnd,
 }) {
   const timerUrgent   = timer !== null && timer < 300;
   const timerCritical = timer !== null && timer < 60;
@@ -122,6 +122,13 @@ export default function TeacherDashboard({
           <button onClick={onStartGame}
             className="px-4 py-1 bg-cyber-purple text-black text-xs font-bold tracking-widest hover:opacity-90">
             ▶ НАЧАТЬ
+          </button>
+        )}
+
+        {isAdmin && roomState.phase === 'playing' && (
+          <button onClick={() => { if (confirm('Завершить игру досрочно для всех?')) onForceEnd(); }}
+            className="px-4 py-1 border border-cyber-red text-cyber-red text-xs font-bold tracking-widest hover:bg-cyber-red hover:text-black transition">
+            🛑 ЗАВЕРШИТЬ ИГРУ
           </button>
         )}
       </header>

@@ -78,7 +78,77 @@ export interface Player {
   name:      string;
   teamName:  string;
   isCaptain: boolean;
+  userId?:   string | null;   // стабильный id игрока (профиль/друзья/инвайты)
+  offline?:  boolean;
 }
+
+// ── User Profiles & Social ─────────────────────────────────
+// Профили персистятся на диск (users.json) и переживают рестарт.
+export interface ContactSet { email: string; vk: string; github: string; }
+export interface PrivacyFlags { email: boolean; vk: boolean; github: boolean; }  // true = публично
+export interface FriendCard  { id: string; name: string; missing?: boolean; }
+
+// Полный профиль владельца (раздел «Мой профиль»).
+export interface OwnProfile {
+  id:       string;
+  name:     string;
+  contacts: ContactSet;
+  privacy:  PrivacyFlags;
+  friends:  FriendCard[];
+  self:     true;
+}
+
+// Публичный профиль чужого игрока — только контакты с флагом public.
+export interface PublicProfile {
+  id:          string;
+  name:        string;
+  contacts:    Partial<ContactSet>;
+  friends:     FriendCard[];
+  friendCount: number;
+  isFriend:    boolean;
+  self:        boolean;
+}
+
+// Соц-контекст цели в комнате наблюдателя (для кнопок инвайта/запроса; только лобби).
+export interface SocialContext {
+  sameRoom:     boolean;
+  online:       boolean;
+  targetTeam:   string | null;
+  iAmCaptainOf: string | null;
+}
+
+// Client→Server:
+//   join_room { roomId, playerName, userId }
+//   get_my_profile | update_profile { name?, contacts?, privacy? }
+//   get_profile { userId } | add_friend { userId } | remove_friend { userId }
+//   team_invite { userId } | team_join_request { userId } | approve_join { userId, accept }
+//   start_game { durationMinutes? } | admin_force_end_game
+// Server→Client:
+//   my_profile { profile: OwnProfile }
+//   profile_view { profile: PublicProfile, context: SocialContext }
+//   team_invite_received { teamName, color, fromName }
+//   join_request_received { fromUserId, fromName, teamName }
+//   social_ack { message_ru }
+//   game_ended.reason: 'timeout' | 'all_sectors' | 'forced'
+
+// ── Task Pool & Packs (Teacher) ────────────────────────────
+// Каталог = глобальные TASKS + room.importedTasks (импортированные в комнату).
+// room.taskPool — зафиксированный учителем набор задач матча (источник истины).
+export interface TaskPack {
+  format:     'aegis-task-pack';
+  version:    number;
+  createdAt?: string;
+  count?:     number;
+  tasks:      Task[];          // полные структуры задач (самодостаточный пак)
+}
+// Client→Server:
+//   admin_get_all_tasks
+//   admin_set_task_pool { taskIds: string[] }
+//   admin_import_pack { tasks: Task[] }
+// Server→Client:
+//   all_tasks_list { tasks: Task[], poolIds: string[] }
+//   task_pool_set { count: number }
+//   pack_imported { packIds: string[], added: number, total: number }
 
 export interface TeamState {
   teamName:     string;

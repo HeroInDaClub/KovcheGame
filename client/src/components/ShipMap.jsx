@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTheme } from '../useTheme.js';
 
 // ── Ship SVG Layout ──────────────────────────────────────
 // 12 sectors arranged as a bird's-eye view of an interstellar ark.
@@ -26,7 +27,22 @@ const HULL_PATH = `M 250,5
   L 320,42 L 360,90 L 400,140 L 410,195 L 400,245 L 290,290 L 210,290 L 100,245
   L 90,195 L 100,140 L 140,90 L 180,42 Z`;
 
-const NEUTRAL = '#0d1526';
+const NEUTRAL = '#0d1526';   // сентинел «не захвачено» (логика), фактический цвет — из палитры
+
+// Палитры карты по теме. Светлая — спокойные пастельные границы и тёмные
+// контуры/подписи вместо неонового свечения.
+const PALETTES = {
+  dark: {
+    hull: '#1a2744', struct: '#1a2744', neutralFill: NEUTRAL, neutralOpacity: 0.3,
+    tail: '#0a0f1e', numFill: '#0a0f1e', numStrokeNeutral: '#2a3a55', numTextNeutral: '#7090b0',
+    labelCaptured: '#e8f0ff', labelNeutral: '#4a6080', markerStroke: '#0a0f1e', markerGlow: true,
+  },
+  light: {
+    hull: '#7c8aa6', struct: '#c2cbdc', neutralFill: '#dde4f1', neutralOpacity: 0.7,
+    tail: '#e7ecf5', numFill: '#ffffff', numStrokeNeutral: '#b6c2d6', numTextNeutral: '#5d6c87',
+    labelCaptured: '#1f2a44', labelNeutral: '#5d6c87', markerStroke: '#ffffff', markerGlow: false,
+  },
+};
 
 function centroid(points) {
   const pts = points.split(' ').map(p => p.split(',').map(Number));
@@ -38,6 +54,7 @@ function centroid(points) {
 export default function ShipMap({ mapSectors, teams, variant = 'panel' }) {
   const [hovered, setHovered] = useState(null);
   const projector = variant === 'projector';
+  const PAL = PALETTES[useTheme()];
 
   const teamColorMap = {};
   for (const t of Object.values(teams)) teamColorMap[t.teamName] = t.color;
@@ -47,7 +64,7 @@ export default function ShipMap({ mapSectors, teams, variant = 'panel' }) {
     const s = getSector(id);
     return s?.capturedBy ? (teamColorMap[s.capturedBy] || NEUTRAL) : NEUTRAL;
   };
-  const getSectorOpacity = (id) => (getSector(id)?.capturedBy ? 0.55 : 0.3);
+  const getSectorOpacity = (id) => (getSector(id)?.capturedBy ? 0.55 : PAL.neutralOpacity);
 
   const hoveredSector = hovered ? getSector(hovered) : null;
 
@@ -79,7 +96,7 @@ export default function ShipMap({ mapSectors, teams, variant = 'panel' }) {
         xmlns="http://www.w3.org/2000/svg"
       >
         {/* Корпус */}
-        <path d={HULL_PATH} fill="none" stroke="#1a2744" strokeWidth="1.5" />
+        <path d={HULL_PATH} fill="none" stroke={PAL.hull} strokeWidth="1.5" />
 
         {/* Слой 1: заливки секторов (интерактивные) */}
         {SECTOR_PATHS.map(sec => {
@@ -89,11 +106,11 @@ export default function ShipMap({ mapSectors, teams, variant = 'panel' }) {
             <polygon
               key={sec.id}
               points={sec.points}
-              fill={color}
+              fill={neutral ? PAL.neutralFill : color}
               fillOpacity={getSectorOpacity(sec.id)}
-              stroke={neutral ? '#1a2744' : color}
+              stroke={neutral ? PAL.struct : color}
               strokeWidth="0.8"
-              strokeOpacity={neutral ? 0.6 : 1}
+              strokeOpacity={neutral ? 0.8 : 1}
               className="transition-all duration-700 cursor-pointer"
               onMouseEnter={() => setHovered(sec.id)}
               onMouseLeave={() => setHovered(null)}
@@ -113,7 +130,7 @@ export default function ShipMap({ mapSectors, teams, variant = 'panel' }) {
                 textAnchor="middle" dominantBaseline="middle"
                 fontSize={fsLabel} fontFamily="monospace"
                 fontWeight={captured ? 'bold' : 'normal'}
-                fill={captured ? '#e8f0ff' : '#4a6080'}
+                fill={captured ? PAL.labelCaptured : PAL.labelNeutral}
                 fillOpacity={captured ? 1 : 0.85}
               >
                 {sec.label}
@@ -123,8 +140,8 @@ export default function ShipMap({ mapSectors, teams, variant = 'panel' }) {
                 <circle
                   cx={cx} cy={cy + off} r={dotR}
                   fill={color}
-                  stroke="#0a0f1e" strokeWidth="0.5"
-                  style={{ filter: `drop-shadow(0 0 2px ${color})` }}
+                  stroke={PAL.markerStroke} strokeWidth="0.5"
+                  style={PAL.markerGlow ? { filter: `drop-shadow(0 0 2px ${color})` } : undefined}
                 />
               )}
             </g>
@@ -132,7 +149,7 @@ export default function ShipMap({ mapSectors, teams, variant = 'panel' }) {
         })}
 
         {/* Дюзы двигателя + нос */}
-        <path d={TAIL_PATH} fill="#0a0f1e" stroke="#1a2744" strokeWidth="1" />
+        <path d={TAIL_PATH} fill={PAL.tail} stroke={PAL.struct} strokeWidth="1" />
         <circle cx="250" cy="12" r="4" fill="#00c8ff" fillOpacity="0.4" />
         <circle cx="250" cy="12" r="2" fill="#00c8ff" fillOpacity="0.9" />
 
@@ -146,15 +163,15 @@ export default function ShipMap({ mapSectors, teams, variant = 'panel' }) {
             <g key={`num-${sec.id}`} pointerEvents="none">
               <circle
                 cx={cx} cy={ny} r={fsNum * 0.95}
-                fill="#0a0f1e"
-                stroke={captured ? color : '#2a3a55'}
+                fill={PAL.numFill}
+                stroke={captured ? color : PAL.numStrokeNeutral}
                 strokeWidth="0.7"
               />
               <text
                 x={cx} y={ny}
                 textAnchor="middle" dominantBaseline="central"
                 fontSize={fsNum} fontFamily="monospace" fontWeight="bold"
-                fill={captured ? color : '#7090b0'}
+                fill={captured ? color : PAL.numTextNeutral}
               >
                 {sec.id}
               </text>
