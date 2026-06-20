@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Users, Shield, Zap, Crown, Plus, UserX, Trash2, LogIn, User, Clock, ListChecks } from 'lucide-react';
+import { Users, Shield, Zap, Crown, Plus, UserX, Trash2, LogIn, User, Clock, ListChecks, Swords } from 'lucide-react';
 
 const DURATIONS = [15, 30, 45, 60, 90];   // минуты
 
@@ -19,6 +19,7 @@ export default function Lobby({
   const [newName, setNewName]   = useState('');
   const [creating, setCreating] = useState(false);
   const [duration, setDuration] = useState(Math.round((roomState.gameDuration || 2700) / 60));
+  const [gameMode, setGameMode] = useState(roomState.gameMode || 'finals');
 
   const submitCreate = () => {
     const n = newName.trim();
@@ -234,12 +235,35 @@ export default function Lobby({
                 </button>
               ))}
             </div>
+
+            {/* Режим матча */}
+            <div className="flex items-center gap-2 flex-wrap text-xs">
+              <Swords size={14} className="text-cyber-purple" />
+              <span className="text-cyber-muted tracking-widest">РЕЖИМ:</span>
+              {[
+                { key: 'qualification', label: 'ОТБОРОЧНЫЙ ТУР', hint: 'у каждой команды свой корабль' },
+                { key: 'finals',        label: 'ФИНАЛ',          hint: 'общая карта, борьба за одни сектора' },
+              ].map(({ key, label, hint }) => (
+                <button key={key} onClick={() => setGameMode(key)} title={hint}
+                  className={`px-3 py-1 tracking-widest border transition
+                    ${gameMode === key ? 'bg-cyber-blue text-black border-cyber-blue font-bold'
+                                       : 'border-cyber-border text-cyber-muted hover:text-cyber-text'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="text-[10px] text-cyber-muted -mt-1">
+              {gameMode === 'qualification'
+                ? '🛡 Отборочный: команды зачищают свои корабли независимо.'
+                : '⚔ Финал: 2–3 команды борются за одни и те же сектора.'}
+            </div>
+
             <button
-              onClick={() => onStartGame(duration)}
+              onClick={() => onStartGame({ durationMinutes: duration, gameMode })}
               disabled={totalPlayers < 1}
               className="w-full py-4 bg-cyber-neon text-black font-bold tracking-widest uppercase text-lg hover:opacity-90 transition disabled:opacity-30"
             >
-              ⚡ НАЧАТЬ ИГРУ ({duration} мин · {totalPlayers} игроков)
+              ⚡ НАЧАТЬ {gameMode === 'qualification' ? 'ОТБОРОЧНЫЙ' : 'ФИНАЛ'} ({duration} мин · {totalPlayers} игроков)
             </button>
           </div>
         )}

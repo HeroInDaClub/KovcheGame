@@ -180,6 +180,7 @@ function createRoom(adminId, adminName, {
     adminId,
     adminName,
     phase:           'lobby',
+    gameMode:        'finals',                     // 'finals' | 'qualification' (ставится при start_game)
     gameDuration:    gameDurationMinutes * 60,   // секунды
     endTimestamp:    null,                         // ставится при start_game
     timerInterval:   null,
@@ -581,8 +582,12 @@ async function submitAnswer(room, socketId, rawAnswer) {
     const earned = getDifficultyPoints(task.level);
     team.score += earned;
 
-    // Захват сектора
-    const sector = room.mapSectors.find(s => s.id === task.sector);
+    // Захват сектора. В режиме «Отборочный тур» карта индивидуальна для команды
+    // (team.mapSectors), захват не влияет на чужие корабли. В «Финале» — общая.
+    const activeMap = (room.gameMode === 'qualification' && Array.isArray(team.mapSectors))
+      ? team.mapSectors
+      : room.mapSectors;
+    const sector = activeMap.find(s => s.id === task.sector);
     const previousOwner = sector ? sector.capturedBy : null;
     if (sector) {
       sector.capturedBy = team.teamName;
@@ -668,6 +673,32 @@ function getDifficultyPoints(level) {
   return level * 50;
 }
 
+// Применить режим игры при старте. В «Отборочном туре» каждой команде выдаём
+// собственную копию карты из 12 секторов (захваты независимы).
+function applyGameMode(room, mode) {
+  room.gameMode = (mode === 'qualification') ? 'qualification' : 'finals';
+  if (room.gameMode === 'qualification') {
+    for (const team of Object.values(room.teams)) {
+      team.mapSectors = MAP_SECTORS.map(s => ({ ...s }));
+    }
+  } else {
+    for (const team of Object.values(room.teams)) delete team.mapSectors;
+  }
+  return room.gameMode;
+}
+
+// Игра завершена досрочно «по секторам»:
+//   • finals       — захвачены все сектора общей карты;
+//   • qualification — каждая команда с игроками зачистила свой корабль.
+function isGameComplete(room) {
+  if (room.gameMode === 'qualification') {
+    const teams = Object.values(room.teams).filter(t => t.members.length > 0);
+    return teams.length > 0 && teams.every(t =>
+      Array.isArray(t.mapSectors) && t.mapSectors.every(s => s.capturedBy !== null));
+  }
+  return room.mapSectors.every(s => s.capturedBy !== null);
+}
+
 // Проекция задачи БЕЗ полей, раскрывающих ответ (для отправки игрокам).
 // interactive_match: обе колонки оставляем, но «правые» перемешиваем — чтобы
 // в payload не было верного соответствия.
@@ -749,6 +780,8 @@ module.exports = {
   submitAnswer,
   abandonTask,
   getPublicRoomState,
+  applyGameMode,
+  isGameComplete,
   deleteRoom,
   startRoomReaper,
   reapRooms,

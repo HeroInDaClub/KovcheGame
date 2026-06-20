@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Clock } from 'lucide-react';
 import ShipMap from './ShipMap.jsx';
 
@@ -86,6 +86,19 @@ export default function TeacherDashboard({
     [roomState.teams]
   );
 
+  // ── Режим игры ──
+  const qualification = roomState.gameMode === 'qualification';
+  const [selName, setSelName] = useState(null);
+  // Выбранный корабль (отборочный): по клику в табах, иначе — лидер.
+  const selectedTeam = qualification ? (hudTeams.find(t => t.teamName === selName) || hudTeams[0] || null) : null;
+  const projectorMap = (qualification && selectedTeam?.mapSectors) ? selectedTeam.mapSectors : roomState.mapSectors;
+
+  // Захвачено секторов командой (mode-aware).
+  const capturedOf = (team) => qualification
+    ? (team.mapSectors || []).filter(s => s.capturedBy).length
+    : (sectorsByTeam[team.teamName] || 0);
+  const headerCaptured = qualification ? (selectedTeam ? capturedOf(selectedTeam) : 0) : capturedTotal;
+
   return (
     <div className="h-screen bg-cyber-dark flex flex-col font-mono select-none overflow-hidden">
 
@@ -103,11 +116,17 @@ export default function TeacherDashboard({
           <span className="text-[10px] border border-cyber-purple/50 text-cyber-purple px-2 py-px tracking-widest">
             УЧИТЕЛЬ · ТРАНСЛЯЦИЯ
           </span>
+          <span className={`text-[10px] border px-2 py-px tracking-widest
+            ${qualification ? 'border-cyber-blue text-cyber-blue' : 'border-cyber-purple text-cyber-purple'}`}>
+            {qualification ? 'ОТБОРОЧНЫЙ' : 'ФИНАЛ'}
+          </span>
         </div>
 
         <div className="flex items-center gap-5 text-xs text-cyber-muted">
           <span>Команд: <span className="text-cyber-text font-bold">{hudTeams.length}</span></span>
-          <span>Захвачено: <span className="text-cyber-neon font-bold">{capturedTotal}/{TOTAL_SECTORS}</span></span>
+          {qualification
+            ? <span>Корабль <span className="text-cyber-text font-bold">{selectedTeam?.teamName || '—'}</span>: <span className="text-cyber-neon font-bold">{headerCaptured}/{TOTAL_SECTORS}</span></span>
+            : <span>Захвачено: <span className="text-cyber-neon font-bold">{headerCaptured}/{TOTAL_SECTORS}</span></span>}
         </div>
 
         <div className={`flex items-center gap-2 px-4 py-1 border font-bold text-xl tracking-widest
@@ -133,12 +152,31 @@ export default function TeacherDashboard({
         )}
       </header>
 
+      {/* ── Табы кораблей команд (только Отборочный тур) ── */}
+      {qualification && hudTeams.length > 0 && (
+        <div className="flex-shrink-0 border-b border-cyber-border bg-cyber-panel px-3 py-1.5 flex items-center gap-2 overflow-x-auto">
+          <span className="text-cyber-purple text-[10px] tracking-widest flex-shrink-0">КОРАБЛИ:</span>
+          {hudTeams.map(team => {
+            const active = selectedTeam?.teamName === team.teamName;
+            return (
+              <button key={team.teamName} onClick={() => setSelName(team.teamName)}
+                className={`flex items-center gap-1.5 px-3 py-1 text-[11px] tracking-widest border whitespace-nowrap transition flex-shrink-0
+                  ${active ? 'text-black font-bold' : 'text-cyber-muted hover:text-cyber-text border-cyber-border'}`}
+                style={active ? { background: team.color, borderColor: team.color } : {}}>
+                <span className="w-2 h-2 rounded-full" style={{ background: active ? '#0a0f1e' : team.color }} />
+                {team.teamName.toUpperCase()} · {capturedOf(team)}/{TOTAL_SECTORS}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* ── Центр: карта на весь viewport (для проектора) ── */}
       <main className="flex-1 min-h-0 relative flex items-center justify-center p-3 cyber-grid">
         <div className="absolute top-2 left-3 text-cyber-purple text-[10px] tracking-widest pointer-events-none z-10">
-          // КАРТА КОВЧЕГА
+          {qualification ? `// КОРАБЛЬ: ${selectedTeam?.teamName?.toUpperCase() || '—'}` : '// КАРТА КОВЧЕГА'}
         </div>
-        <ShipMap variant="projector" mapSectors={roomState.mapSectors} teams={roomState.teams} />
+        <ShipMap variant="projector" mapSectors={projectorMap} teams={roomState.teams} />
       </main>
 
       {/* ── Низ: горизонтальный HUD команд ── */}
@@ -149,7 +187,7 @@ export default function TeacherDashboard({
         {hudTeams.length > 0 ? (
           <div className="flex-1 flex gap-3 overflow-x-auto overflow-y-hidden items-stretch pb-1">
             {hudTeams.map(team => (
-              <TeamHudBar key={team.teamName} team={team} captured={sectorsByTeam[team.teamName] || 0} />
+              <TeamHudBar key={team.teamName} team={team} captured={capturedOf(team)} />
             ))}
           </div>
         ) : (

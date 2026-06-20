@@ -271,7 +271,7 @@ function registerHandlers(io, socket) {
   });
 
   // ── START GAME (Admin only) ──────────────────────────────
-  socket.on('start_game', ({ durationMinutes } = {}) => {
+  socket.on('start_game', ({ durationMinutes, gameMode } = {}) => {
     const roomId = socket.data.roomId;
     const room = gs.getRoom(roomId);
     if (!room) return socket.emit('error', { message_ru: 'Комната не найдена', code: 'ROOM_NOT_FOUND' });
@@ -284,6 +284,10 @@ function registerHandlers(io, socket) {
       const mins = Math.max(5, Math.min(120, parseInt(durationMinutes) || 45));
       room.gameDuration = mins * 60;
     }
+
+    // Режим матча: 'qualification' (у каждой команды свой корабль) или 'finals'
+    // (общая карта). По умолчанию — finals (текущая схема).
+    gs.applyGameMode(room, gameMode || room.gameMode);
 
     room.phase = 'playing';
     // Точный таймер на таймстампе: без ежесекундного декремента/рассылки.
@@ -398,15 +402,21 @@ function registerHandlers(io, socket) {
     }
 
     if (result.correct) {
-      // Broadcast sector capture + updated leaderboard to whole room
-      io.to(roomId).emit('sector_captured', {
+      // Уведомление о захвате сектора. В «Финале» — всей комнате (общая борьба);
+      // в «Отборочном» карта приватна, шлём только команде.
+      const capturePayload = {
         sector:   result.capturedSector,
         teamName: playerTeam?.team.teamName,
         teamColor: playerTeam?.team.color,
-      });
+      };
+      if (room.gameMode === 'qualification') {
+        if (playerTeam) for (const m of playerTeam.team.members) io.to(m.id).emit('sector_captured', capturePayload);
+      } else {
+        io.to(roomId).emit('sector_captured', capturePayload);
+      }
 
-      // Check win condition: all sectors captured
-      const allCaptured = room.mapSectors.every(s => s.capturedBy !== null);
+      // Условие досрочной победы (mode-aware)
+      const allCaptured = gs.isGameComplete(room);
       if (allCaptured) {
         clearInterval(room.timerInterval);
         room.timerInterval = null;

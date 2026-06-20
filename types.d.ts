@@ -5,6 +5,7 @@
 export type DifficultyLevel = 1 | 2 | 3 | 4 | 5;
 export type TaskStatusValue  = 'available' | 'in_progress' | 'solved' | 'abandoned' | 'failed';
 export type GamePhase        = 'lobby' | 'playing' | 'ended';
+export type GameMode         = 'qualification' | 'finals';  // отборочный (свои карты) | финал (общая)
 export type TaskType         = 'multiple_choice' | 'code_repair' | 'text_phrase' | 'full_code' | 'interactive_match';
 export type TaskCategory     = 'logic_crypto' | 'cs_theory' | 'programming';
 export type CodeLanguage     = 'python' | 'kumir' | 'pascal';
@@ -158,6 +159,7 @@ export interface TeamState {
   members:      Player[];
   activeTaskId: string | null;
   taskStatuses: Record<string, TaskStatus>;
+  mapSectors?:  MapSector[];   // только в режиме 'qualification' — личная карта команды
 }
 
 export interface MapSector {
@@ -171,13 +173,16 @@ export interface RoomState {
   roomId:        string;
   adminId:       string;
   phase:         GamePhase;
+  gameMode:      GameMode;      // 'finals' (общая карta) | 'qualification' (карта у каждой команды)
   globalTimer:   number;
   gameDuration:  number;
   teams:         Record<string, TeamState>;
-  taskPool:      Task[];
-  mapSectors:    MapSector[];
+  taskPool:      Task[];        // публичная проекция (без полей ответа)
+  mapSectors:    MapSector[];   // общая карта (используется в 'finals')
   createdAt:     string;
 }
+
+// start_game { durationMinutes?: number; gameMode?: GameMode }
 
 // ── Socket Payloads ────────────────────────────────────────
 
